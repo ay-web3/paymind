@@ -45,3 +45,27 @@ export function calculateRSI(prices, period = 14) {
 
   return rsiArray;
 }
+
+export function calculateVWAP(candles) {
+  let cumulativePV = 0;
+  let cumulativeVolume = 0;
+  let lastDay = null;
+
+  return candles.map(c => {
+    const day = new Date(c.x).toDateString();
+
+    if (day !== lastDay) {
+      cumulativePV = 0;
+      cumulativeVolume = 0;
+      lastDay = day;
+    }
+
+    if (!c.v || c.v === 0) return null;
+
+    const typicalPrice = (c.h + c.l + c.c) / 3;
+    cumulativePV += typicalPrice * c.v;
+    cumulativeVolume += c.v;
+
+    return cumulativePV / cumulativeVolume;
+  });
+}

@@ -12,7 +12,7 @@ import {
   PointElement,
   Legend
 } from "chart.js";
-
+import { useMemo } from "react";
 import {
   CandlestickController,
   CandlestickElement
@@ -20,6 +20,7 @@ import {
 import zoomPlugin from "chartjs-plugin-zoom";
 import { Chart } from "react-chartjs-2";
 import "chartjs-adapter-date-fns";
+import { Filler } from "chart.js";
 
 
 ChartJS.register(
@@ -35,14 +36,36 @@ ChartJS.register(
   LineElement,
   PointElement,
   CandlestickController,
-  CandlestickElement
+  CandlestickElement,
+  Filler
 );
 
 const API_BASE =
   "https://super-invention-qvp46rrwg67cxjvj-3000.app.github.dev";
 
+  
+
 export default function CryptoChart({ coin }) {
   
+  async function loadLivePrice() {
+  try {
+    const res = await fetch(
+      `${API_BASE}/crypto/live-price?coin=${coin}`
+    );
+    const data = await res.json();
+    setLivePrice(data.price);
+  } catch (err) {
+    console.error("Live price fetch failed", err);
+  }
+}
+
+useEffect(() => {
+  loadLivePrice();
+
+  const id = setInterval(loadLivePrice, 15000); // every 15s
+  return () => clearInterval(id);
+}, [coin]);
+
 
   /* ======================
      State
@@ -59,6 +82,8 @@ export default function CryptoChart({ coin }) {
   yellow: "#facc15",
   purple: "#a855f7"
 };
+
+  const ZONE_PADDING = 0.005; // 0.5% zone thickness
   const [candles, setCandles] = useState([]);
   const [ema20, setEma20] = useState([]);
   const [ema50, setEma50] = useState([]);
@@ -70,10 +95,18 @@ export default function CryptoChart({ coin }) {
   const [currentPrice, setCurrentPrice] = useState(null);
   const [priceChange24h, setPriceChange24h] = useState(null);
   const [timeframe, setTimeframe] = useState("1h");
+  const [hasPaid, setHasPaid] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const [zones, setZones] = useState([]);
+  const [locked, setLocked] = useState(true);
+  const [paying, setPaying] = useState(false);
+  const [livePrice, setLivePrice] = useState(null);
+  const [vwap, setVwap] = useState([]);
   
   /* ======================
      Load chart data
   ====================== */
+  
   async function load() {
     try {
       const res = await fetch(
@@ -97,6 +130,8 @@ export default function CryptoChart({ coin }) {
       setEma20(data.ema20 || []);
       setEma50(data.ema50 || []);
       setRsi(data.rsi || []);
+      setZones([]);
+      setLocked(true);
 
       if (cleanCandles.length > 0) {
         const last = cleanCandles[cleanCandles.length - 1];
@@ -131,9 +166,43 @@ export default function CryptoChart({ coin }) {
     return () => clearInterval(id);
   }, [coin, timeframe]);
 
-  if (!candles.length) {
-    return <div className="glass-card">Loading chart…</div>;
+
+
+  async function unlockAnalysis() {
+  try {
+    setPaying(true);
+
+    const res = await fetch(`${API_BASE}/analysis`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        userAddress: window.ethereum?.selectedAddress,
+        coin,
+        tf: timeframe
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error("Payment or analysis failed");
+    }
+
+    const data = await res.json();
+    console.log("PAID ANALYSIS RESPONSE:", data);
+
+    setVwap(data.analysis.vwap || []);
+    setAnalysis(data);
+    setHasPaid(true);
+    setLocked(false);
+  } catch (err) {
+    console.error("Unlock analysis failed:", err);
+    alert(err.message);
+  } finally {
+    setPaying(false);
   }
+}
+
 
   /* ======================
      Datasets
@@ -194,24 +263,28 @@ const ema50Dataset = {
   yAxisID: "price"
 };
 
-const rsiChartData = {
-  datasets: [
-    {
-      type: "line",
-      data: rsi
-        .map((v, i) =>
-          typeof v === "number" && candles[i]
-            ? { x: candles[i].x, y: v }
-            : null
-        )
-        .filter(Boolean),
-      borderColor: COLORS.purple,
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0.35
-    }
-  ]
-};
+
+
+const vwapDataset = useMemo(() => {
+  if (!vwap.length || !candles.length) return null;
+
+  return {
+    type: "line",
+    label: "VWAP",
+    data: vwap
+      .map((v, i) =>
+        typeof v === "number" && candles[i]
+          ? { x: candles[i].x, y: v }
+          : null
+      )
+      .filter(Boolean),
+    borderColor: "#38bdf8", // sky blue
+    borderWidth: 1.8,
+    pointRadius: 0,
+    tension: 0.25,
+    yAxisID: "price"
+  };
+}, [vwap, candles]);
 
 const rsiOptions = {
   responsive: true,
@@ -227,13 +300,12 @@ const rsiOptions = {
     y: {
       min: 0,
       max: 100,
-      grid: {
-        color: COLORS.grid
-      },
       ticks: {
-        color: COLORS.purple,
-        callback: v => (v === 30 || v === 50 || v === 70 ? v : "")
+        callback: v => ([30, 50, 70].includes(v) ? v : "")
       },
+      grid: {
+        color: COLORS.grid},
+      
       afterBuildTicks: scale => {
         scale.ticks = [
           { value: 30 },
@@ -245,23 +317,206 @@ const rsiOptions = {
   }
 };
 
+  const zonesFromAnalysis = analysis?.analysis?.zones;
+  const structure = analysis?.analysis?.structure;
 
-  const chartData = {
+  const bosDataset = useMemo(() => {
+  if (!hasPaid || !structure?.bos || !candles.length) return [];
+
+  const level = structure.bos.level;
+
+  return [
+    {
+      label: "BOS",
+      type: "line",
+      data: candles.map(c => ({ x: c.x, y: level })),
+      borderColor:
+        structure.bos.type === "bullish_bos"
+          ? "rgba(22,199,132,0.9)"
+          : "rgba(234,57,67,0.9)",
+      borderWidth: 2,
+      borderDash: [6, 6],
+      pointRadius: 0,
+      yAxisID: "price"
+    }
+  ];
+}, [hasPaid, structure, candles]);
+
+
+const zoneDatasets = useMemo(() => {
+  if (!hasPaid || !zonesFromAnalysis?.length || !candles.length) return [];
+
+  const lastCandle = candles[candles.length - 1];
+  const currentPrice = lastCandle?.c;
+  if (!currentPrice) return [];
+
+  const maxStrength = Math.max(
+    ...zonesFromAnalysis.map(z => z.strength || 1)
+  );
+
+  return zonesFromAnalysis.flatMap((z, idx) => {
+    const low = Number(z.low);
+    const high = Number(z.high);
+    if (!low || !high) return [];
+
+    const strength = z.strength || 1;
+
+    // map strength → opacity (0.1 → 0.45)
+    const opacity = Math.min(
+      0.1 + (strength / maxStrength) * 0.35,
+      0.45
+    );
+
+    // 🔑 Dynamic support / resistance based on CURRENT price
+    const isSupport = high < currentPrice;
+
+    const color = isSupport
+      ? `rgba(22,199,132,${opacity})`
+      : `rgba(234,57,67,${opacity})`;
+
+    const isMajor = strength === maxStrength;
+
+    return [
+      {
+        label: `zone-low-${idx}`,
+        type: "line",
+        data: candles.map(c => ({ x: c.x, y: low })),
+        backgroundColor: color,
+        borderColor: "transparent",
+        fill: { target: "+1" },
+        pointRadius: 0,
+        borderWidth: 0,
+        yAxisID: "price"
+      },
+      {
+        label: `zone-high-${idx}`,
+        type: "line",
+        data: candles.map(c => ({ x: c.x, y: high })),
+        borderColor: isMajor
+          ? "rgba(255,255,255,0.35)"
+          : "transparent",
+        borderWidth: isMajor ? 1 : 0,
+        pointRadius: 0,
+        yAxisID: "price"
+      }
+    ];
+  });
+}, [hasPaid, zonesFromAnalysis, candles]);
+
+
+
+
+const swingDatasets = useMemo(() => {
+  if (!hasPaid || !structure?.swings?.length || !candles.length) return [];
+
+  const highs = structure.swings.filter(s => s.type === "high");
+  const lows = structure.swings.filter(s => s.type === "low");
+
+  return [
+    {
+      label: "Swing Highs",
+      type: "scatter",
+      parsing: false,
+      order: 10,
+      data: highs.map(s => ({ x: s.time, y: s.price })),
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      pointBackgroundColor: "rgba(234,57,67,1)",
+      yAxisID: "price"
+    },
+    {
+      label: "Swing Lows",
+      type: "scatter",
+      parsing: false,
+      order: 10,
+      data: lows.map(s => ({ x: s.time, y: s.price })),
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      pointBackgroundColor: "rgba(22,199,132,1)",
+      yAxisID: "price"
+    }
+  ];
+}, [hasPaid, structure, candles]);
+
+const structureEventDataset = useMemo(() => {
+  if (!hasPaid || !structure?.event || !candles.length) return [];
+
+  const { event } = structure;
+
+  return [
+    {
+      label: event.type,
+      type: "line",
+      parsing: false,
+      order: 12,
+      data: candles.map(c => ({
+        x: c.x,
+        y: event.price
+      })),
+      borderColor:
+        event.direction === "bullish"
+          ? "rgba(22,199,132,0.85)"
+          : "rgba(234,57,67,0.85)",
+      borderWidth: event.type === "BOS" ? 2.5 : 2,
+      borderDash: event.type === "CHoCH" ? [6, 6] : [],
+      pointRadius: 0,
+      yAxisID: "price"
+    }
+  ];
+}, [hasPaid, structure, candles]);
+
+
+
+  const chartData = useMemo(
+  () => ({
     datasets: [
-      candleDataset,
-      ...(showEMA ? [ema20Dataset, ema50Dataset] : []),
-      volumeDataset,
-      
-    ]
-  };
+    ...zoneDatasets,     // background
+    ...swingDatasets,
+    ...structureEventDataset,
+  ...bosDataset,       // structure
+  candleDataset,
+  ...(showEMA ? [ema20Dataset, ema50Dataset] : []),
+  ...(vwapDataset ? [vwapDataset] : []),
+  volumeDataset
+]
+  }),
+  [zoneDatasets, candles, ema20, ema50, showEMA, livePrice]
+);
 
-  const options = {
+
+
+  
+
+const rsiChartData = useMemo(() => ({
+  datasets: [
+    {
+      type: "line",
+      data: rsi
+        .map((v, i) =>
+          typeof v === "number" && candles[i]
+            ? { x: candles[i].x, y: v }
+            : null
+        )
+        .filter(Boolean),
+      borderColor: COLORS.purple,
+      borderWidth: 1.5,
+      pointRadius: 0
+    }
+  ]
+}), [rsi, candles]);
+
+if (!candles.length) {
+    return <div className="glass-card">Loading chart…</div>;
+  }
+
+  const priceOptions = {
   responsive: true,
   maintainAspectRatio: false,
   normalized: true,
 
   plugins: {
     legend: { display: false },
+    
 
     zoom: {
       pan: {
@@ -320,82 +575,304 @@ const rsiOptions = {
      Render
   ====================== */
  return (
-  <div className="glass-card" style={{ height: 620 }}>
-
-    {/* TradingView style toolbar */}
+  <div
+    className="sv-terminal-v2"
+    style={{
+      height: 640,
+      background: "#09090b",
+      borderRadius: 16,
+      border: "1px solid #27272a",
+      display: "flex",
+      flexDirection: "column",
+      fontFamily: "'Inter', sans-serif",
+      color: "#fafafa",
+      boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+      overflow: "hidden"
+    }}
+  >
+    {/* ───────────────── COMPACT HEADER ───────────────── */}
     <div
       style={{
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        padding: "10px 12px",
-        borderBottom: "1px solid rgba(255,255,255,0.08)"
+        padding: "10px 16px",
+        background: "#09090b",
+        borderBottom: "1px solid #18181b"
       }}
     >
-      {/* Left */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <strong>{coin.toUpperCase()}/USD</strong>
-
-        <span style={{ color: "#16c784", fontWeight: "bold" }}>
-          ${currentPrice?.toLocaleString()}
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#a1a1aa" }}>
+          {coin.toUpperCase()}/USD
         </span>
-
-        {priceChange24h !== null && (
-          <span
-            style={{
-              color: priceChange24h >= 0 ? "#16c784" : "#ea3943",
-              fontWeight: "bold"
-            }}
-          >
-            {priceChange24h >= 0 ? "▲" : "▼"}{" "}
-            {priceChange24h.toFixed(2)}%
-          </span>
-        )}
+        <span style={{ fontSize: 13, fontWeight: 700 }}>
+          ${livePrice?.toLocaleString()}
+        </span>
+        <span style={{ 
+          fontSize: 11, 
+          fontWeight: 600, 
+          color: priceChange24h >= 0 ? "#10b981" : "#ef4444" 
+        }}>
+          {priceChange24h >= 0 ? "+" : ""}{priceChange24h.toFixed(2)}%
+        </span>
       </div>
 
-      {/* Center */}
-      <div style={{ display: "flex", gap: 6 }}>
-        {["1h", "1d", "7d"].map(tf => (
-  <button
-  onClick={() => setTimeframe(tf)}
-  style={{
-    padding: "4px 10px",
-    borderRadius: 6,
-    background: timeframe === tf ? "#22d3ee" : "#0f172a",
-    color: timeframe === tf ? "#000" : "#9ca3af",
-    border: "1px solid rgba(255,255,255,0.1)",
-    fontSize: 12,
-    cursor: "pointer"
-  }}
->
-  {tf.toUpperCase()}
-</button>
-))}
-      </div>
-
-      {/* Right */}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={() => setShowEMA(v => !v)}>EMA</button>
-        <button onClick={load}>⟳</button>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", background: "#18181b", padding: 2, borderRadius: 8, border: "1px solid #27272a" }}>
+          {["1h", "1d", "7d"].map(tf => (
+            <button
+              key={tf}
+              onClick={() => setTimeframe(tf)}
+              style={{
+                padding: "4px 10px",
+                background: timeframe === tf ? "#27272a" : "transparent",
+                color: timeframe === tf ? "#ffffff" : "#71717a",
+                border: "none",
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: "pointer",
+                borderRadius: 6
+              }}
+            >
+              {tf.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={load}
+          style={{
+            background: "none",
+            border: "1px solid #27272a",
+            color: "#71717a",
+            borderRadius: 8,
+            width: 28,
+            height: 28,
+            cursor: "pointer",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}
+        >
+          ↻
+        </button>
       </div>
     </div>
 
-    {/* Chart */}
-    <div style={{ height: 400 }}>
-  <Chart
-    data={chartData}
-    options={options}
+    {/* ───────────────── STRUCTURE & OHLC BAR ───────────────── */}
+    <div style={{ 
+      display: "flex", 
+      alignItems: "center",
+      padding: "8px 16px", 
+      gap: 16, 
+      background: "#09090b", 
+      borderBottom: "1px solid #18181b",
+    }}>
+      {/* MARKET STRUCTURE */}
+<div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    paddingRight: 16,
+    borderRight: "1px solid #27272a"
+  }}
+>
+  {/* Status dot */}
+  <div
+    style={{
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background:
+        structure?.bias === "bullish"
+          ? "#10b981"
+          : structure?.bias === "bearish"
+          ? "#ef4444"
+          : "#eab308",
+      boxShadow: `0 0 6px ${
+        structure?.bias === "bullish"
+          ? "rgba(16,185,129,0.35)"
+          : structure?.bias === "bearish"
+          ? "rgba(239,68,68,0.35)"
+          : "rgba(234,179,8,0.35)"
+      }`
+    }}
   />
-  
 
+  {/* STRUCTURE text */}
+  <span
+    style={{
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: "0.6px",
+      color: "#e4e4e7"
+    }}
+  >
+    STRUCTURE:
+    <span
+      style={{
+        marginLeft: 6,
+        color:
+          structure?.bias === "bullish"
+            ? "#10b981"
+            : structure?.bias === "bearish"
+            ? "#ef4444"
+            : "#eab308"
+      }}
+    >
+      {structure?.bias?.toUpperCase() || "RANGING"}
+    </span>
+  </span>
+
+  {/* EVENT text */}
+  {structure?.event && (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.6px",
+        color: "#a1a1aa"
+      }}
+    >
+      EVENT:
+      <span
+        style={{
+          marginLeft: 6,
+          color:
+            structure.event.direction === "bullish"
+              ? "#10b981"
+              : "#ef4444"
+        }}
+      >
+        {structure.event.type.toUpperCase()}
+      </span>
+    </span>
+  )}
 </div>
 
-  {/* RSI CHART */}
-  <div style={{ height: 120, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-    <Chart data={rsiChartData} options={rsiOptions} />
+
+      {/* OHLC DATA */}
+      <div style={{ display: "flex", gap: 12, fontSize: 10, fontWeight: 500, color: "#71717a" }}>
+        <span>O <span style={{color: "#e4e4e7"}}>{currentPrice?.toLocaleString()}</span></span>
+        <span>H <span style={{color: "#e4e4e7"}}>{currentPrice?.toLocaleString()}</span></span>
+        <span>L <span style={{color: "#e4e4e7"}}>{currentPrice?.toLocaleString()}</span></span>
+        <span>C <span style={{color: "#e4e4e7"}}>{currentPrice?.toLocaleString()}</span></span>
+      </div>
+    </div>
+
+    {/* ───────────────── MAIN CHART ───────────────── */}
+    <div style={{ flex: 1, position: "relative", cursor: "crosshair" }}>
+      
+      {/* TRADINGVIEW STYLE PRICE LABEL */}
+      <div style={{
+        position: "absolute",
+        right: 0,
+        top: "42%",
+        zIndex: 10,
+        background: "#27272a",
+        color: "#ffffff",
+        padding: "2px 6px",
+        fontSize: 10,
+        fontWeight: 600,
+        border: "1px solid #3f3f46",
+        borderRadius: "2px 0 0 2px"
+      }}>
+        {livePrice?.toLocaleString()}
+      </div>
+
+      {/* LOADING OVERLAY */}
+      {paying && (
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(9, 9, 11, 0.85)",
+          backdropFilter: "blur(4px)",
+          zIndex: 50,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12
+        }}>
+          <div style={{ 
+            width: 24, height: 24, 
+            border: "2px solid rgba(255,255,255,0.05)", 
+            borderTop: "2px solid #ffffff", 
+            borderRadius: "50%", 
+            animation: "spin 0.6s linear infinite" 
+          }} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: "#71717a", letterSpacing: "1px" }}>SYNCING...</span>
+        </div>
+      )}
+
+      <Chart
+        key={`price-${coin}-${timeframe}`}
+        data={chartData}
+        options={{
+          ...priceOptions,
+          layout: { background: { color: "transparent" }, textColor: "#71717a" },
+          grid: { 
+            vertLines: { color: "#18181b" }, 
+            horzLines: { color: "#18181b" } 
+          },
+          crosshair: { mode: 1 }
+        }}
+      />
+    </div>
+
+    {/* ───────────────── RSI ───────────────── */}
+    <div style={{ height: 150, borderTop: "1px solid #18181b", background: "#09090b" }}>
+      <div style={{ padding: "8px 16px", fontSize: 9, color: "#3f3f46", fontWeight: 800, letterSpacing: "0.5px" }}>
+        RELATIVE STRENGTH INDEX (14)
+      </div>
+      <Chart
+        key={`rsi-${coin}-${timeframe}`}
+        data={rsiChartData}
+        options={{
+          ...rsiOptions,
+          layout: { background: { color: "transparent" } },
+          grid: { vertLines: { visible: false }, horzLines: { color: "#18181b" } }
+        }}
+      />
+    </div>
+
+    {/* ───────────────── FOOTER ───────────────── */}
+    {!hasPaid && (
+      <div style={{ padding: "12px 16px", borderTop: "1px solid #18181b", background: "#09090b" }}>
+        <button
+          onClick={unlockAnalysis}
+          disabled={paying}
+          style={{
+            width: "100%",
+            padding: "10px",
+            background: "transparent",
+            color: "#ffffff",
+            borderRadius: 8,
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.5px",
+            border: "1px solid #27272a",
+            cursor: "pointer",
+            transition: "all 0.15s ease"
+          }}
+          onMouseOver={(e) => {
+            e.target.style.background = "#ffffff";
+            e.target.style.color = "#000000";
+          }}
+          onMouseOut={(e) => {
+            e.target.style.background = "transparent";
+            e.target.style.color = "#ffffff";
+          }}
+        >
+          {paying ? "VERIFYING ACCESS..." : "REQUEST INSTITUTIONAL ANALYSIS"}
+        </button>
+      </div>
+    )}
+
+    <style>{`
+      @keyframes spin { to { transform: rotate(360deg); } }
+    `}</style>
   </div>
-
-</div>
 );
-
 }

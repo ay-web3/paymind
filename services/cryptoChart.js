@@ -14,22 +14,7 @@ function cgFetch(url) {
    Helpers
 ============================ */
 
-function groupByHour(candles, volumes) {
-  const map = {};
 
-  candles.forEach(c => {
-    const hour = Math.floor(c.x / 3600000) * 3600000;
-    if (!map[hour]) map[hour] = { ...c, x: hour, v: 0 };
-    else map[hour].c = c.c;
-  });
-
-  volumes.forEach(([ts, vol]) => {
-    const hour = Math.floor(ts / 3600000) * 3600000;
-    if (map[hour]) map[hour].v += vol;
-  });
-
-  return Object.values(map);
-}
 
 /* ============================
    Main candles endpoint
@@ -65,9 +50,7 @@ if (tf === "7d") days = 365;   // 1 year;
   const volData = await volRes.json();
   const volumes = volData.total_volumes;
 
-  if (tf === "1h") {
-    return groupByHour(candles, volumes);
-  }
+  
 
   // attach volume directly for 1d / 7d
   return candles.map((c, i) => ({
@@ -88,4 +71,13 @@ export async function getMarketChart(coinId, days = 7) {
 
   const data = await res.json();
   return data.prices;
+}
+
+export async function getLivePrice(coinId) {
+  const url = `${BASE}/simple/price?ids=${coinId}&vs_currencies=usd`;
+  const res = await cgFetch(url);
+  if (!res.ok) throw new Error("Failed to fetch live price");
+
+  const data = await res.json();
+  return data[coinId]?.usd ?? null;
 }

@@ -20,6 +20,7 @@
   "homepage": "https://github.com/ay-web3/agentic-commerce#readme",
   "dependencies": {
     "chart.js": "^4.5.1",
+    "chartjs-plugin-annotation": "^2.2.1",
     "chartjs-plugin-zoom": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

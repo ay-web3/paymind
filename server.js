@@ -1,7 +1,8 @@
+import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
-import dotenv from "dotenv";
+import { analyzeMarketStructure } from "./services/marketStructure.js";
 import { ethers } from "ethers";
 import fs from "fs";
 import fetch from "node-fetch";
@@ -19,9 +20,21 @@ import { loadMemeCoins } from "./coin/loadMemeCoins.js";
 import { setMemeCoins } from "./coin/presets.js";
 import { MEME_COINS } from "./coin/presets.js";
 import { getMultiCoinPricesLarge } from "./services/coingecko.js";
-import { getMarketChart } from "./services/cryptoChart.js";
+import {
+  getMarketChart,
+  getMarketCandles,
+  getLivePrice
+} from "./services/cryptoChart.js";
 import { calculateSupportResistance, detectTrend } from "./services/technicalAnalysis.js";
-import { calculateEMA, calculateRSI } from "./services/indicators.js";
+import {
+  calculateEMA,
+  calculateRSI,
+  calculateVWAP
+} from "./services/indicators.js";
+import {
+  calculateZonesFromVolume,
+  rankZonesByStrength
+} from "./services/zoneAnalysis.js";
 
 const USDC_ADDRESS = process.env.USDC_ADDRESS;
 
@@ -50,6 +63,8 @@ const provider = new ethers.JsonRpcProvider(ARC_RPC_URL);
 const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
 console.log("Backend signer address:", await signer.getAddress());
 const agentProvider = new ethers.JsonRpcProvider(ARC_RPC_URL);
+
+
 
 const agentSigner = new ethers.Wallet(
   process.env.AGENT_PRIVATE_KEY,
@@ -253,6 +268,25 @@ app.get("/", (_, res) => res.send("Agentic Commerce AI API running"));
 ======================= */
 
 
+/* =======================
+   LIVE PRICE (NO x402)
+======================= */
+
+app.get("/crypto/live-price", async (req, res) => {
+  try {
+    const coin = req.query.coin || "ethereum";
+    const price = await getCoinPrice(coin);
+
+    res.json({
+      coin,
+      price
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: err.message
+    });
+  }
+});
 
 /* =======================
    X402 VERIFICATION
@@ -330,6 +364,108 @@ app.get("/search-product", (req, res) => {
   });
 });
 
+/* =======================
+   PAID ANALYSIS (x402 via AGENT)
+======================= */
+
+/* =======================
+   PAID ANALYSIS (STYLE A — AGENT PAYS)
+======================= */
+
+app.post("/analysis", async (req, res) => {
+  try {
+    const { userAddress, coin = "bitcoin", tf = "1h" } = req.body;
+
+    if (!userAddress) {
+      return res.status(400).json({ error: "Missing userAddress" });
+    }
+
+    // 1️⃣ Fetch candles FIRST
+    const rawCandles = await getMarketCandles(coin, tf);
+    const { limit } = getTfConfig(tf);
+    let candles = rawCandles.slice(-limit);
+
+    
+   
+    if (!candles.length) {
+      return res.status(400).json({ error: "No candle data" });
+    }
+
+    // 2️⃣ Inject live price into last candle
+    const livePrice = await getLivePrice(coin);
+    const lastIndex = candles.length - 1;
+    const last = candles[lastIndex];
+
+    candles[lastIndex] = {
+      ...last,
+      c: livePrice,
+      h: Math.max(last.h, livePrice),
+      l: Math.min(last.l, livePrice)
+    };
+
+    const tfClose = candles[candles.length - 1].c;
+
+    // 3️⃣ THEN do payment
+    const PRODUCT_ID = 4;
+    const PRICE = "0.001";
+
+    const txHash = await agentPayForAccess(
+      userAddress,
+      PRODUCT_ID,
+      `zone-analysis:${coin}:${tf}`,
+      PRICE
+    );
+
+    const isValid = await verifyContractPayment(
+      txHash,
+      PRODUCT_ID,
+      PRICE
+    );
+
+    if (!isValid) {
+      return res.status(402).json({
+        error: "Payment verification failed"
+      });
+    }
+
+    // 4️⃣ THEN calculate zones
+    const rawZones = calculateZonesFromVolume(candles);
+    const rankedZones = rankZonesByStrength(rawZones, candles);
+    const vwap = calculateVWAP(candles);
+    const structure = analyzeMarketStructure(candles);
+
+    // 5️⃣ Normalize zone type
+    const normalizedZones = rankedZones.map(z => ({
+      ...z,
+      type: z.high < tfClose ? "support" : "resistance"
+    }));
+
+    // 6️⃣ Respond ONCE
+    res.json({
+      paid: true,
+      txHash,
+      coin,
+      timeframe: tf,
+      prices: {
+        live: livePrice,
+        tfClose
+      },
+      analysis: {
+        zones: normalizedZones,
+        vwap,
+        structure
+      }
+    });
+    
+  } catch (err) {
+    console.error("Paid analysis error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
 app.get("/prices/meme-coins", async (req, res) => {
   try {
     const data = await getMultiCoinPricesLarge(MEME_COINS);
@@ -395,7 +531,7 @@ app.get("/crypto/chart/:coinId", async (req, res) => {
   }
 });
 
-import { getMarketCandles } from "./services/cryptoChart.js";
+
 
 function getTfConfig(tf) {
   switch (tf) {
@@ -875,10 +1011,30 @@ ${JSON.stringify(recipes.recipes.slice(0, 20), null, 2)}
    START
 ======================= */
 
+/* =======================
+   START (DEBUG VERSION)
+======================= */
+
 (async () => {
-  await initProducts();
-  indexProducts(PRODUCT_CACHE);
-  console.log("TEST search lip:", findProductIdsFromText("lip"));
-console.log("TEST search phone:", findProductIdsFromText("phone"));
-  app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
+  console.log("Step 1: Starting initProducts...");
+
+  try {
+    await initProducts();
+    console.log("Step 2: Products initialized. Indexing...");
+
+    indexProducts(PRODUCT_CACHE);
+
+    console.log("Step 3: Starting Express on PORT", PORT);
+
+    const server = app.listen(PORT, () => {
+      console.log(`🚀 Server finally running on ${PORT}`);
+    });
+
+    server.on("error", e => {
+      console.error("EXPRESS SERVER ERROR:", e);
+    });
+  } catch (error) {
+    console.error("❌ CRASHED DURING STARTUP:", error);
+    process.exit(1);
+  }
 })();
