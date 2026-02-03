@@ -102,7 +102,7 @@ useEffect(() => {
   const [paying, setPaying] = useState(false);
   const [livePrice, setLivePrice] = useState(null);
   const [vwap, setVwap] = useState([]);
-  
+  const [aiExplanation, setAiExplanation] = useState("");
   /* ======================
      Load chart data
   ====================== */
@@ -172,29 +172,46 @@ useEffect(() => {
   try {
     setPaying(true);
 
+    // 🔐 Ensure wallet is connected
+    if (!window.ethereum) {
+      throw new Error("Wallet not detected");
+    }
+
+    const [address] = await window.ethereum.request({
+      method: "eth_requestAccounts"
+    });
+
+    if (!address) {
+      throw new Error("Wallet connection failed");
+    }
+
+    // 📡 Request paid analysis
     const res = await fetch(`${API_BASE}/analysis`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        userAddress: window.ethereum?.selectedAddress,
+        userAddress: address,
         coin,
         tf: timeframe
       })
     });
 
+    const data = await res.json();
+
     if (!res.ok) {
-      throw new Error("Payment or analysis failed");
+      throw new Error(data?.error || "Payment or analysis failed");
     }
 
-    const data = await res.json();
     console.log("PAID ANALYSIS RESPONSE:", data);
 
-    setVwap(data.analysis.vwap || []);
-    setAnalysis(data);
+    // ✅ Hydrate frontend state from backend
+    setAnalysis(data.analysis);
+    setAiExplanation(data.analysis?.explanation || "");
     setHasPaid(true);
     setLocked(false);
+
   } catch (err) {
     console.error("Unlock analysis failed:", err);
     alert(err.message);
@@ -202,6 +219,7 @@ useEffect(() => {
     setPaying(false);
   }
 }
+
 
 
   /* ======================
@@ -317,8 +335,8 @@ const rsiOptions = {
   }
 };
 
-  const zonesFromAnalysis = analysis?.analysis?.zones;
-  const structure = analysis?.analysis?.structure;
+  const zonesFromAnalysis = analysis?.zones;
+const structure = analysis?.structure;
 
   const bosDataset = useMemo(() => {
   if (!hasPaid || !structure?.bos || !candles.length) return [];
@@ -578,7 +596,7 @@ if (!candles.length) {
   <div
     className="sv-terminal-v2"
     style={{
-      height: 640,
+      height: 800,
       background: "#09090b",
       borderRadius: 16,
       border: "1px solid #27272a",
@@ -820,9 +838,8 @@ if (!candles.length) {
         }}
       />
     </div>
-
     {/* ───────────────── RSI ───────────────── */}
-    <div style={{ height: 150, borderTop: "1px solid #18181b", background: "#09090b" }}>
+    <div style={{ height: 120, borderTop: "1px solid #18181b", background: "#09090b" }}>
       <div style={{ padding: "8px 16px", fontSize: 9, color: "#3f3f46", fontWeight: 800, letterSpacing: "0.5px" }}>
         RELATIVE STRENGTH INDEX (14)
       </div>
@@ -836,6 +853,27 @@ if (!candles.length) {
         }}
       />
     </div>
+    
+    {hasPaid && aiExplanation && (
+  <div
+    style={{
+      maxHeight: 120,
+      overflowY: "auto",
+      padding: "10px 16px",
+      borderBottom: "1px solid #18181b",
+      background: "#09090b",
+      fontSize: 11,
+      lineHeight: 1.6,
+      color: "#a1a1aa"
+    }}
+  >
+    {aiExplanation.split("\n\n").map((p, i) => (
+      <p key={i} style={{ marginBottom: 8 }}>{p}</p>
+    ))}
+  </div>
+)}
+
+    
 
     {/* ───────────────── FOOTER ───────────────── */}
     {!hasPaid && (

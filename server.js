@@ -35,6 +35,7 @@ import {
   calculateZonesFromVolume,
   rankZonesByStrength
 } from "./services/zoneAnalysis.js";
+import { generateAIExplanation } from "./services/aiExplanation.js";
 
 const USDC_ADDRESS = process.env.USDC_ADDRESS;
 
@@ -364,13 +365,7 @@ app.get("/search-product", (req, res) => {
   });
 });
 
-/* =======================
-   PAID ANALYSIS (x402 via AGENT)
-======================= */
 
-/* =======================
-   PAID ANALYSIS (STYLE A — AGENT PAYS)
-======================= */
 
 app.post("/analysis", async (req, res) => {
   try {
@@ -380,18 +375,24 @@ app.post("/analysis", async (req, res) => {
       return res.status(400).json({ error: "Missing userAddress" });
     }
 
-    // 1️⃣ Fetch candles FIRST
+    /* ──────────────────────────────
+       1️⃣ FETCH MARKET DATA
+    ────────────────────────────── */
     const rawCandles = await getMarketCandles(coin, tf);
-    const { limit } = getTfConfig(tf);
-    let candles = rawCandles.slice(-limit);
+const { limit } = getTfConfig(tf);
 
-    
-   
-    if (!candles.length) {
-      return res.status(400).json({ error: "No candle data" });
-    }
+if (!rawCandles || rawCandles.length < 60) {
+  return res.status(400).json({
+    error: "Insufficient candle data for analysis"
+  });
+}
 
-    // 2️⃣ Inject live price into last candle
+const MAX_CANDLES = Math.min(limit, rawCandles.length);
+let candles = rawCandles.slice(-MAX_CANDLES);
+
+    /* ──────────────────────────────
+       2️⃣ LIVE PRICE INJECTION (BEFORE INDICATORS)
+    ────────────────────────────── */
     const livePrice = await getLivePrice(coin);
     const lastIndex = candles.length - 1;
     const last = candles[lastIndex];
@@ -403,16 +404,39 @@ app.post("/analysis", async (req, res) => {
       l: Math.min(last.l, livePrice)
     };
 
-    const tfClose = candles[candles.length - 1].c;
+    const tfClose = livePrice;
 
-    // 3️⃣ THEN do payment
+    /* ──────────────────────────────
+       3️⃣ INDICATORS (SERIES)
+    ────────────────────────────── */
+    const closes = candles.map(c => c.c);
+    const ema50Series = calculateEMA(candles, 50);
+    const rsiSeries = calculateRSI(closes, 14);
+    const vwapSeries = calculateVWAP(candles);
+
+    const ema50 = ema50Series.at(-1);
+    
+
+
+const validRSI = rsiSeries.filter(v => Number.isFinite(v));
+if (!validRSI.length) {
+  throw new Error("RSI calculation failed");
+}
+
+const rsi = validRSI.at(-1);
+    const vwap = vwapSeries.at(-1);
+
+    
+    /* ──────────────────────────────
+       4️⃣ PAYMENT (x402)
+    ────────────────────────────── */
     const PRODUCT_ID = 4;
     const PRICE = "0.001";
 
     const txHash = await agentPayForAccess(
       userAddress,
       PRODUCT_ID,
-      `zone-analysis:${coin}:${tf}`,
+      `market-analysis:${coin}:${tf}`,
       PRICE
     );
 
@@ -423,24 +447,76 @@ app.post("/analysis", async (req, res) => {
     );
 
     if (!isValid) {
-      return res.status(402).json({
-        error: "Payment verification failed"
-      });
+      return res.status(402).json({ error: "Payment verification failed" });
     }
 
-    // 4️⃣ THEN calculate zones
-    const rawZones = calculateZonesFromVolume(candles);
-    const rankedZones = rankZonesByStrength(rawZones, candles);
-    const vwap = calculateVWAP(candles);
+    /* ──────────────────────────────
+       5️⃣ STRUCTURE + ZONES
+    ────────────────────────────── */
     const structure = analyzeMarketStructure(candles);
 
-    // 5️⃣ Normalize zone type
+    const rawZones = calculateZonesFromVolume(candles);
+    const rankedZones = rankZonesByStrength(rawZones, candles);
+
     const normalizedZones = rankedZones.map(z => ({
       ...z,
       type: z.high < tfClose ? "support" : "resistance"
     }));
 
-    // 6️⃣ Respond ONCE
+    const price = livePrice;
+
+const emaValue = ema50;
+const vwapValue = vwap;
+
+const distanceToEMA =
+  emaValue ? ((price - emaValue) / emaValue) * 100 : 0;
+
+const distanceToVWAP =
+  vwapValue ? ((price - vwapValue) / vwapValue) * 100 : 0;
+    const rsiState =
+  rsi > 60 ? "strong" :
+  rsi < 40 ? "weak" :
+  "neutral";
+
+  const nearestZone = normalizedZones
+  .map(z => ({
+    ...z,
+    distancePct: ((livePrice - z.low) / livePrice) * 100
+  }))
+  .sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct))[0];
+
+    /* ──────────────────────────────
+       6️⃣ AI EXPLANATION
+    ────────────────────────────── */
+    const aiExplanation = generateAIExplanation({
+  coin,
+  timeframe: tf,
+  structure,
+
+  zones: normalizedZones,
+  nearestZone,
+
+  ema: {
+    value: emaValue,
+    distancePct: distanceToEMA
+  },
+
+  vwap: {
+    value: vwapValue,
+    distancePct: distanceToVWAP
+  },
+
+  rsi: {
+    value: Number(rsi.toFixed(1)),
+    state: rsiState
+  },
+
+  price
+});
+
+    /* ──────────────────────────────
+       7️⃣ RESPONSE
+    ────────────────────────────── */
     res.json({
       paid: true,
       txHash,
@@ -451,20 +527,27 @@ app.post("/analysis", async (req, res) => {
         tfClose
       },
       analysis: {
+        structure,
         zones: normalizedZones,
+
+        ema50,
+        ema50Series,
+
         vwap,
-        structure
+        vwapSeries,
+
+        rsi,
+        rsiSeries,
+
+        explanation: aiExplanation
       }
     });
-    
+
   } catch (err) {
     console.error("Paid analysis error:", err);
     res.status(500).json({ error: err.message });
   }
 });
-
-
-
 
 app.get("/prices/meme-coins", async (req, res) => {
   try {
