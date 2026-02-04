@@ -35,7 +35,7 @@ import {
   calculateZonesFromVolume,
   rankZonesByStrength
 } from "./services/zoneAnalysis.js";
-import { generateAIExplanation } from "./services/aiExplanation.js";
+
 
 const USDC_ADDRESS = process.env.USDC_ADDRESS;
 
@@ -330,6 +330,95 @@ async function verifyContractPayment(txHash, expectedId, minAmount) {
   return false;
 }
 
+function round(n, dp = 2) {
+  return Number.isFinite(n) ? Number(n.toFixed(dp)) : null;
+}
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function computeInvalidation(structure) {
+  if (!structure) return null;
+
+  if (structure.bias === "bullish" && structure.lastLow?.price) {
+    return {
+      side: "bullish",
+      level: structure.lastLow.price,
+      text: "Bias breaks if price closes below the last swing low."
+    };
+  }
+
+  if (structure.bias === "bearish" && structure.lastHigh?.price) {
+    return {
+      side: "bearish",
+      level: structure.lastHigh.price,
+      text: "Bias breaks if price closes above the last swing high."
+    };
+  }
+
+  if (structure.lastHigh?.price && structure.lastLow?.price) {
+    return {
+      side: "range",
+      upper: structure.lastHigh.price,
+      lower: structure.lastLow.price,
+      text: "Range breaks if price closes above the last swing high or below the last swing low."
+    };
+  }
+
+  return null;
+}
+
+function computeConfidence({ structure, nearestZone, emaDist, vwapDist, rsi, mtf }) {
+  let score = 45;
+
+  if (structure?.bias === "bullish" || structure?.bias === "bearish") {
+    score += 10;
+  }
+
+  if (structure?.event?.type === "BOS") score += 15;
+  if (structure?.event?.type === "CHoCH") score += 8;
+
+  if (nearestZone?.strength) {
+    score += clamp(nearestZone.strength * 18, 0, 18);
+  }
+
+  const bothAbove = emaDist > 1 && vwapDist > 1;
+  const bothBelow = emaDist < -1 && vwapDist < -1;
+  if (bothAbove || bothBelow) score += 10;
+
+  if (Number.isFinite(rsi)) {
+    if (rsi > 60 || rsi < 40) score += 5;
+  }
+  if (mtf?.enabled) {
+  if (mtf.status === "aligned") score += 12;
+  if (mtf.status === "conflict") score -= 18;
+  if (mtf.status === "htf_range") score += 4;
+  if (mtf.status === "ltf_range") score -= 6;
+}
+
+  return clamp(Math.round(score), 0, 100);
+}
+
+async function narrateFacts(callGemini, facts) {
+  const prompt = `
+You are a calm professional trader. Write a short human summary of the facts below.
+
+STRICT RULES:
+- Use ONLY the facts from JSON. Do NOT invent targets, predictions, extra indicators, or extra numbers.
+- If something is null/unknown, skip it.
+- 4–7 short lines max.
+- Avoid repetitive phrasing. Vary wording naturally.
+- Mention confidence and invalidation when provided.
+- If mtf is present, include one line about alignment/conflict.
+
+FACTS(JSON):
+${JSON.stringify(facts)}
+`.trim();
+
+  const text = await callGemini(prompt);
+  return String(text || "").trim();
+}
 
 /* =======================
    PAID DATASET
@@ -375,24 +464,20 @@ app.post("/analysis", async (req, res) => {
       return res.status(400).json({ error: "Missing userAddress" });
     }
 
-    /* ──────────────────────────────
-       1️⃣ FETCH MARKET DATA
-    ────────────────────────────── */
+    /* 1) FETCH MARKET DATA */
     const rawCandles = await getMarketCandles(coin, tf);
-const { limit } = getTfConfig(tf);
+    const { limit } = getTfConfig(tf);
 
-if (!rawCandles || rawCandles.length < 60) {
-  return res.status(400).json({
-    error: "Insufficient candle data for analysis"
-  });
-}
+    if (!Array.isArray(rawCandles) || rawCandles.length < 60) {
+      return res.status(400).json({
+        error: "Insufficient candle data for analysis"
+      });
+    }
 
-const MAX_CANDLES = Math.min(limit, rawCandles.length);
-let candles = rawCandles.slice(-MAX_CANDLES);
+    const MAX_CANDLES = Math.min(limit, rawCandles.length);
+    let candles = rawCandles.slice(-MAX_CANDLES);
 
-    /* ──────────────────────────────
-       2️⃣ LIVE PRICE INJECTION (BEFORE INDICATORS)
-    ────────────────────────────── */
+    /* 2) LIVE PRICE INJECTION (BEFORE INDICATORS) */
     const livePrice = await getLivePrice(coin);
     const lastIndex = candles.length - 1;
     const last = candles[lastIndex];
@@ -406,9 +491,8 @@ let candles = rawCandles.slice(-MAX_CANDLES);
 
     const tfClose = livePrice;
 
-    /* ──────────────────────────────
-       3️⃣ INDICATORS (SERIES)
-    ────────────────────────────── */
+    /* 3) INDICATORS (SERIES) — FIXED */
+
     const closes = candles.map(c => c.c);
     const ema50Series = calculateEMA(candles, 50);
     const rsiSeries = calculateRSI(closes, 14);
@@ -426,10 +510,7 @@ if (!validRSI.length) {
 const rsi = validRSI.at(-1);
     const vwap = vwapSeries.at(-1);
 
-    
-    /* ──────────────────────────────
-       4️⃣ PAYMENT (x402)
-    ────────────────────────────── */
+    /* 4) PAYMENT (x402) */
     const PRODUCT_ID = 4;
     const PRICE = "0.001";
 
@@ -440,20 +521,55 @@ const rsi = validRSI.at(-1);
       PRICE
     );
 
-    const isValid = await verifyContractPayment(
-      txHash,
-      PRODUCT_ID,
-      PRICE
-    );
+    const isValid = await verifyContractPayment(txHash, PRODUCT_ID, PRICE);
 
     if (!isValid) {
       return res.status(402).json({ error: "Payment verification failed" });
     }
 
-    /* ──────────────────────────────
-       5️⃣ STRUCTURE + ZONES
-    ────────────────────────────── */
+    /* 5) STRUCTURE + ZONES */
     const structure = analyzeMarketStructure(candles);
+    /* 5.1) MTF STRUCTURE (HTF) */
+const htfTf = getHigherTf(tf);
+
+let htfStructure = null;
+let mtf = {
+  enabled: false,
+  htfTf: null,
+  status: "none",
+  aligned: null
+};
+
+if (htfTf) {
+  const rawHtfCandles = await getMarketCandles(coin, htfTf);
+  const { limit: htfLimit } = getTfConfig(htfTf);
+
+  const MAX_HTF = Math.min(htfLimit, rawHtfCandles?.length || 0);
+  const htfCandles = (rawHtfCandles || []).slice(-MAX_HTF);
+
+  if (htfCandles.length >= 10) {
+    // Optional: inject HTF live price only when HTF candle matches current day
+    // (safe to skip for now)
+    htfStructure = analyzeMarketStructure(htfCandles);
+
+    const alignment = computeMtfAlignment(
+      structure?.bias,
+      htfStructure?.bias
+    );
+
+    mtf = {
+      enabled: true,
+      htfTf,
+      status: alignment.status, // aligned | conflict | htf_range | ltf_range
+      aligned: alignment.aligned,
+      ltfBias: normalizeBias(structure?.bias),
+      htfBias: normalizeBias(htfStructure?.bias),
+      ltfEvent: structure?.event || null,
+      htfEvent: htfStructure?.event || null
+    };
+  }
+}
+
 
     const rawZones = calculateZonesFromVolume(candles);
     const rankedZones = rankZonesByStrength(rawZones, candles);
@@ -463,83 +579,167 @@ const rsi = validRSI.at(-1);
       type: z.high < tfClose ? "support" : "resistance"
     }));
 
+    // Nearest zone (by mid distance to current price)
+    const nearestZone = normalizedZones?.length
+      ? normalizedZones
+          .map(z => {
+            const mid = (z.low + z.high) / 2;
+            const distancePct = ((livePrice - mid) / livePrice) * 100;
+            return { ...z, distancePct };
+          })
+          .sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct))[0]
+      : null;
+
+    // Distances
     const price = livePrice;
 
-const emaValue = ema50;
-const vwapValue = vwap;
+    const emaValue = Number.isFinite(ema50) ? ema50 : null;
+    const vwapValue = Number.isFinite(vwap) ? vwap : null;
 
-const distanceToEMA =
-  emaValue ? ((price - emaValue) / emaValue) * 100 : 0;
+    const distanceToEMA =
+      emaValue ? ((price - emaValue) / emaValue) * 100 : 0;
 
-const distanceToVWAP =
-  vwapValue ? ((price - vwapValue) / vwapValue) * 100 : 0;
+    const distanceToVWAP =
+      vwapValue ? ((price - vwapValue) / vwapValue) * 100 : 0;
+
     const rsiState =
-  rsi > 60 ? "strong" :
-  rsi < 40 ? "weak" :
-  "neutral";
+      rsi === null ? "unknown" :
+      rsi > 60 ? "strong" :
+      rsi < 40 ? "weak" :
+      "neutral";
 
-  const nearestZone = normalizedZones
-  .map(z => ({
-    ...z,
-    distancePct: ((livePrice - z.low) / livePrice) * 100
-  }))
-  .sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct))[0];
+    /* 6) CONFIDENCE + INVALIDATION (CODE DECIDES) */
+    const invalidation = computeInvalidation(structure);
 
-    /* ──────────────────────────────
-       6️⃣ AI EXPLANATION
-    ────────────────────────────── */
-    const aiExplanation = generateAIExplanation({
-  coin,
-  timeframe: tf,
-  structure,
+    const confidence = computeConfidence({
+      structure,
+      nearestZone,
+      emaDist: distanceToEMA,
+      vwapDist: distanceToVWAP,
+      rsi,
+      mtf
+    });
+    
+    function getHigherTf(tf) {
+  // LTF -> HTF mapping
+  if (tf === "1h") return "1d";
+  if (tf === "1d") return "7d";
+  return null; // for 7d or unknown
+}
 
-  zones: normalizedZones,
-  nearestZone,
 
-  ema: {
-    value: emaValue,
-    distancePct: distanceToEMA
-  },
 
-  vwap: {
-    value: vwapValue,
-    distancePct: distanceToVWAP
-  },
+function normalizeBias(bias) {
+  if (!bias) return "range";
 
-  rsi: {
-    value: Number(rsi.toFixed(1)),
-    state: rsiState
-  },
+  const b = String(bias).toLowerCase();
 
-  price
-});
+  if (b.includes("bull")) return "bullish";
+  if (b.includes("bear")) return "bearish";
 
-    /* ──────────────────────────────
-       7️⃣ RESPONSE
-    ────────────────────────────── */
+  return "range";
+}
+
+function computeMtfAlignment(ltfBias, htfBias) {
+  const l = normalizeBias(ltfBias);
+  const h = normalizeBias(htfBias);
+
+  // HTF range = neutral context (not a conflict)
+  if (h === "range") {
+    return { status: "htf_range", aligned: true };
+  }
+
+  // LTF range while HTF trending = indecision
+  if (l === "range" && h !== "range") {
+    return { status: "ltf_range", aligned: false };
+  }
+
+  // Same trend direction
+  if (l === h) {
+    return { status: "aligned", aligned: true };
+  }
+
+  // Opposite directions
+  return { status: "conflict", aligned: false };
+}
+
+    /* 7) FACTS PACKET (ONLY TRUTH) */
+    const facts = {
+      coin,
+      timeframe: tf,
+      price: round(price, 2),
+
+      mtf: mtf.enabled ? mtf : null,
+
+      structure: structure ? {
+        bias: structure.bias,
+        event: structure.event ? {
+          type: structure.event.type,
+          direction: structure.event.direction,
+          price: round(structure.event.price, 2)
+        } : null,
+        lastHigh: structure.lastHigh?.price ? round(structure.lastHigh.price, 2) : null,
+        lastLow: structure.lastLow?.price ? round(structure.lastLow.price, 2) : null
+      } : null,
+
+      nearestZone: nearestZone ? {
+        type: nearestZone.type,
+        low: round(nearestZone.low, 2),
+        high: round(nearestZone.high, 2),
+        strength: round(nearestZone.strength, 2),
+        distancePct: round(nearestZone.distancePct, 2)
+      } : null,
+
+      confluence: {
+        ema50: emaValue ? {
+          value: round(emaValue, 2),
+          distancePct: round(distanceToEMA, 2)
+        } : null,
+        vwap: vwapValue ? {
+          value: round(vwapValue, 2),
+          distancePct: round(distanceToVWAP, 2)
+        } : null,
+        rsi14: rsi !== null ? {
+          value: round(rsi, 1),
+          state: rsiState
+        } : { value: null, state: "unknown" }
+      },
+
+      confidence,
+      invalidation
+    };
+
+    /* 8) AI NARRATION (FLEXIBLE WORDING, NO INVENTING) */
+    const explanation = await narrateFacts(callGemini, facts);
+
+    /* 9) RESPONSE */
     res.json({
       paid: true,
       txHash,
       coin,
       timeframe: tf,
-      prices: {
-        live: livePrice,
-        tfClose
-      },
+      prices: { live: livePrice, tfClose },
       analysis: {
+        facts,                 // ✅ structured truth for UI
+        explanation,           // ✅ human narration
+
+        // keep your chart series too:
         structure,
+        htfStructure,   // ✅ add this
+        mtf,            // ✅ add this
+        confidence,
+        invalidation,
         zones: normalizedZones,
+        nearestZone,
 
         ema50,
         ema50Series,
 
-        vwap,
+        vwap: vwapValue,
         vwapSeries,
 
         rsi,
-        rsiSeries,
-
-        explanation: aiExplanation
+        rsiSeries
       }
     });
 
@@ -548,6 +748,7 @@ const distanceToVWAP =
     res.status(500).json({ error: err.message });
   }
 });
+
 
 app.get("/prices/meme-coins", async (req, res) => {
   try {

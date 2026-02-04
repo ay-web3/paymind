@@ -43,9 +43,9 @@ ChartJS.register(
 const API_BASE =
   "https://super-invention-qvp46rrwg67cxjvj-3000.app.github.dev";
 
-  
 
-export default function CryptoChart({ coin }) {
+
+export default function CryptoChart({ coin, initialTimeframe = "1h" }) {
   
   async function loadLivePrice() {
   try {
@@ -94,7 +94,7 @@ useEffect(() => {
 
   const [currentPrice, setCurrentPrice] = useState(null);
   const [priceChange24h, setPriceChange24h] = useState(null);
-  const [timeframe, setTimeframe] = useState("1h");
+  const [timeframe, setTimeframe] = useState(initialTimeframe);
   const [hasPaid, setHasPaid] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [zones, setZones] = useState([]);
@@ -103,6 +103,9 @@ useEffect(() => {
   const [livePrice, setLivePrice] = useState(null);
   const [vwap, setVwap] = useState([]);
   const [aiExplanation, setAiExplanation] = useState("");
+  useEffect(() => {
+  setTimeframe(initialTimeframe);
+}, [initialTimeframe]);
   /* ======================
      Load chart data
   ====================== */
@@ -207,7 +210,9 @@ useEffect(() => {
     console.log("PAID ANALYSIS RESPONSE:", data);
 
     // ✅ Hydrate frontend state from backend
+    
     setAnalysis(data.analysis);
+    setVwap(data.analysis?.vwapSeries || []);
     setAiExplanation(data.analysis?.explanation || "");
     setHasPaid(true);
     setLocked(false);
@@ -360,6 +365,57 @@ const structure = analysis?.structure;
   ];
 }, [hasPaid, structure, candles]);
 
+const invalidation = analysis?.invalidation || analysis?.facts?.invalidation;
+
+const invalidationDatasets = useMemo(() => {
+  if (!hasPaid || !invalidation || !candles.length) return [];
+
+  const mkLine = (label, level, color, dash = [6, 6]) => ({
+    label,
+    type: "line",
+    parsing: false,
+    order: 20,
+    data: candles.map(c => ({ x: c.x, y: level })),
+    borderColor: color,
+    borderWidth: 2,
+    borderDash: dash,
+    pointRadius: 0,
+    yAxisID: "price"
+  });
+
+  // Trend invalidation
+  if (Number.isFinite(invalidation.level)) {
+    const color =
+      invalidation.side === "bullish"
+        ? "rgba(234,57,67,0.9)" // red (bull invalidation is below)
+        : "rgba(22,199,132,0.9)"; // green (bear invalidation is above)
+
+    return [mkLine("Invalidation", invalidation.level, color, [8, 6])];
+  }
+
+  // Range invalidation (upper + lower)
+  if (
+    Number.isFinite(invalidation.upper) &&
+    Number.isFinite(invalidation.lower)
+  ) {
+    return [
+      mkLine(
+        "Range Upper Break",
+        invalidation.upper,
+        "rgba(255,255,255,0.45)",
+        [6, 6]
+      ),
+      mkLine(
+        "Range Lower Break",
+        invalidation.lower,
+        "rgba(255,255,255,0.45)",
+        [6, 6]
+      )
+    ];
+  }
+
+  return [];
+}, [hasPaid, invalidation, candles]);
 
 const zoneDatasets = useMemo(() => {
   if (!hasPaid || !zonesFromAnalysis?.length || !candles.length) return [];
@@ -492,6 +548,7 @@ const structureEventDataset = useMemo(() => {
     ...swingDatasets,
     ...structureEventDataset,
   ...bosDataset,       // structure
+  ...invalidationDatasets,
   candleDataset,
   ...(showEMA ? [ema20Dataset, ema50Dataset] : []),
   ...(vwapDataset ? [vwapDataset] : []),
@@ -742,7 +799,14 @@ if (!candles.length) {
       {structure?.bias?.toUpperCase() || "RANGING"}
     </span>
   </span>
-
+{analysis?.mtf?.enabled && (
+  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.6px", color: "#a1a1aa" }}>
+    MTF:
+    <span style={{ marginLeft: 6, color: analysis.mtf.aligned ? "#10b981" : "#ef4444" }}>
+      {analysis.mtf.htfTf.toUpperCase()} {analysis.mtf.htfBias.toUpperCase()} ({analysis.mtf.status})
+    </span>
+  </span>
+)}
   {/* EVENT text */}
   {structure?.event && (
     <span

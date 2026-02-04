@@ -48,6 +48,10 @@ export default function App() {
   const [txHash, setTxHash] = useState("");
   const [step, setStep] = useState("");
   const [loading, setLoading] = useState(false);
+  const [intentText, setIntentText] = useState("");
+  const [intentResult, setIntentResult] = useState(null);
+  const [cryptoCoin, setCryptoCoin] = useState("bitcoin");
+  const [cryptoTf, setCryptoTf] = useState("1h");
 
   /* =====================
      Wallet
@@ -63,6 +67,113 @@ export default function App() {
       alert("Wallet connection failed");
     }
   }
+
+  function inferIntent(text) {
+  const t = (text || "").toLowerCase().trim();
+
+  // ─────────────────────────
+  // CRYPTO INTENT
+  // ─────────────────────────
+  if (
+    t.match(
+      /\b(btc|bitcoin|eth|ethereum|sol|solana|xrp|doge|crypto|chart|price|rsi|vwap|ema)\b/
+    )
+  ) {
+    // timeframe extraction
+    const tf =
+      t.match(/\b(1h|1d|7d)\b/)?.[1] ||
+      (t.includes("daily")
+        ? "1d"
+        : t.includes("weekly")
+        ? "7d"
+        : "1h");
+
+    // coin extraction (basic)
+    const coin =
+      t.includes("bitcoin") || t.includes("btc")
+        ? "bitcoin"
+        : t.includes("ethereum") || t.includes("eth")
+        ? "ethereum"
+        : t.includes("solana") || t.includes("sol")
+        ? "solana"
+        : "bitcoin";
+
+    return {
+      type: "crypto",
+      coin,
+      tf
+    };
+  }
+
+  // ─────────────────────────
+  // COMMERCE INTENT
+  // ─────────────────────────
+  if (
+    t.match(
+      /\b(product|profit|profitability|dropship|store|ads|marketing|sentiment|supplier)\b/
+    )
+  ) {
+    const task =
+      t.includes("sentiment")
+        ? "Analyze sentiment"
+        : t.includes("marketing")
+        ? "Generate marketing ideas"
+        : t.includes("custom") || t.includes("research")
+        ? "Custom research"
+        : "Analyze profitability";
+
+    return {
+      type: "commerce",
+      task,
+      productQuery: text
+    };
+  }
+
+  // ─────────────────────────
+  // UNKNOWN
+  // ─────────────────────────
+  return { type: "unknown" };
+}
+
+async function runIntent() {
+  const intent = inferIntent(intentText);
+  setIntentResult(intent);
+
+  // ───────────────── CRYPTO ─────────────────
+  if (intent.type === "crypto") {
+  setCryptoCoin(intent.coin);
+  setCryptoTf(intent.tf);
+  setView("crypto");
+  return;
+}
+
+  // ───────────────── COMMERCE ─────────────────
+  if (intent.type === "commerce") {
+    setView("commerce");
+    setTask(intent.task);
+
+    // Optional: auto search products from the intent text
+    try {
+      const ids = await searchProducts(intent.productQuery);
+      setSuggestions(ids || []);
+
+      if (ids?.length) {
+        const firstId = ids[0];
+        setSelectedProductId(firstId);
+        setSearchText(PRODUCT_MAP?.[firstId] || "");
+      }
+    } catch (e) {
+      console.warn("Product auto-search failed:", e);
+      setSuggestions([]);
+    }
+
+    return;
+  }
+
+  alert(
+    "I’m not sure if this is Crypto or Commerce. Mention a coin (BTC/ETH) or a product task."
+  );
+}
 
   /* =====================
      Agent
@@ -266,109 +377,164 @@ export default function App() {
       </section>
 
       {/* DASHBOARD */}
-      <section id="dashboard">
-        {view === "commerce" && (
-          <>
-            <h2 className="section-title">AI Agent Dashboard</h2>
+      <div className="glass-card" style={{ marginBottom: 18 }}>
+  <h3>Universal Agent</h3>
+  <p style={{ color: "#94a3b8", fontSize: 12 }}>
+    Try: “Analyze BTC 1h”, “Check ETH daily”, “Profitability of wireless earbuds”
+  </p>
 
-            <div className="glass-card">
-              <h3>AI Agent Wallet</h3>
+  <div style={{ display: "flex", gap: 10 }}>
+    <input
+      value={intentText}
+      onChange={e => setIntentText(e.target.value)}
+      placeholder="Tell the agent what you want..."
+      style={{ flex: 1 }}
+    />
+    <button className="btn-glow" onClick={runIntent} disabled={!intentText.trim()}>
+      Run
+    </button>
+  </div>
 
-              {!agentWallet && address && (
-                <>
-                  <input
-                    placeholder="Daily limit (USDC)"
-                    value={dailyLimit}
-                    onChange={(e) => setDailyLimit(e.target.value)}
-                  />
-                  <br />
-                  <br />
-                  <button className="btn-glow" onClick={createAgentWallet}>
-                    Create AI Agent
-                  </button>
-                </>
-              )}
+  {intentResult?.type && intentResult.type !== "unknown" && (
+    <div style={{ marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
+      Routed to: <b>{intentResult.type.toUpperCase()}</b>
+      {intentResult.type === "crypto" && (
+        <> — {intentResult.coin} ({intentResult.tf})</>
+      )}
+      {intentResult.type === "commerce" && (
+        <> — {intentResult.task}</>
+      )}
+    </div>
+  )}
+</div>
+      {/* DASHBOARD */}
+<section id="dashboard">
+  {/* ✅ SHARED AGENT WALLET (VISIBLE ON BOTH COMMERCE + CRYPTO) */}
+  <h2 className="section-title">AI Agent Wallet</h2>
 
-              {agentWallet && (
-                <>
-                  <p>Status: 🟢 Active</p>
-                  <p>Address: {shortAddr(agentWallet)}</p>
-                  <p>Balance: {agentBalance} USDC</p>
+  <div className="glass-card">
+    <h3>AI Agent Wallet</h3>
 
-                  <input
-                    placeholder="Fund amount"
-                    value={fundAmount}
-                    onChange={(e) => setFundAmount(e.target.value)}
-                  />
-                  <br />
-                  <br />
-                  <button className="btn-glow" onClick={fundAgent}>
-                    Fund Agent
-                  </button>
-                </>
-              )}
-            </div>
+    {!address && (
+      <p style={{ color: "#94a3b8" }}>
+        Connect your wallet to create and fund your AI agent.
+      </p>
+    )}
 
-            <div className="glass-card" style={{ marginTop: 24 }}>
-              <h3>AI Assistant</h3>
+    {!agentWallet && address && (
+      <>
+        <input
+          placeholder="Daily limit (USDC)"
+          value={dailyLimit}
+          onChange={e => setDailyLimit(e.target.value)}
+        />
+        <br />
+        <br />
+        <button className="btn-glow" onClick={createAgentWallet} disabled={loading}>
+          {loading ? "Working..." : "Create AI Agent"}
+        </button>
+      </>
+    )}
 
-              <input
-                placeholder="Search product..."
-                value={searchText}
-                onChange={handleSearchChange}
-                style={{ width: "100%" }}
-              />
+    {agentWallet && (
+      <>
+        <p>Status: 🟢 Active</p>
+        <p>Address: {shortAddr(agentWallet)}</p>
+        <p>Balance: {agentBalance} USDC</p>
 
-              {suggestions.map((id) => (
-                <div
-                  key={id}
-                  className="table-row"
-                  onClick={() => selectProduct(id)}
-                >
-                  {PRODUCT_MAP[id]}
-                </div>
-              ))}
+        <input
+          placeholder="Fund amount"
+          value={fundAmount}
+          onChange={e => setFundAmount(e.target.value)}
+        />
+        <br />
+        <br />
+        <button className="btn-glow" onClick={fundAgent} disabled={loading}>
+          {loading ? "Funding..." : "Fund Agent"}
+        </button>
+      </>
+    )}
 
-              <select value={task} onChange={(e) => setTask(e.target.value)}>
-                <option>Analyze profitability</option>
-                <option>Analyze sentiment</option>
-                <option>Generate marketing ideas</option>
-                <option>Custom research</option>
-              </select>
+    {step && <p>⏳ {step}</p>}
+  </div>
 
-              {task === "Custom research" && (
-                <textarea
-                  placeholder="Describe what you want AI to research..."
-                  value={customQuery}
-                  onChange={(e) => setCustomQuery(e.target.value)}
-                />
-              )}
+  {/* 🛒 COMMERCE AI VIEW */}
+  {view === "commerce" && (
+    <>
+      <h2 className="section-title" style={{ marginTop: 24 }}>
+        Commerce AI
+      </h2>
 
-              <br />
-              <br />
+      <div className="glass-card" style={{ marginTop: 12 }}>
+        <h3>AI Assistant</h3>
 
-              <button
-                className="btn-glow"
-                onClick={buyAndAnalyze}
-                disabled={loading}
-              >
-                {loading ? "Working..." : "Run AI Agent"}
-              </button>
+        <input
+          placeholder="Search product..."
+          value={searchText}
+          onChange={handleSearchChange}
+          style={{ width: "100%" }}
+        />
 
-              {step && <p>⏳ {step}</p>}
-              {analysis && <pre>{analysis}</pre>}
-            </div>
-          </>
+        {suggestions.map(id => (
+          <div
+            key={id}
+            className="table-row"
+            onClick={() => selectProduct(id)}
+          >
+            {PRODUCT_MAP[id]}
+          </div>
+        ))}
+
+        <select value={task} onChange={e => setTask(e.target.value)}>
+          <option>Analyze profitability</option>
+          <option>Analyze sentiment</option>
+          <option>Generate marketing ideas</option>
+          <option>Custom research</option>
+        </select>
+
+        {task === "Custom research" && (
+          <textarea
+            placeholder="Describe what you want AI to research..."
+            value={customQuery}
+            onChange={e => setCustomQuery(e.target.value)}
+          />
         )}
 
-        {view === "crypto" && (
-          <>
-            <h2 className="section-title">Crypto AI Dashboard</h2>
-            <CryptoChart coin="bitcoin" />
-            <CoinGeckoDashboard userAddress={address} />
-          </>
+        <br />
+        <br />
+
+        <button
+          className="btn-glow"
+          onClick={buyAndAnalyze}
+          disabled={loading}
+        >
+          {loading ? "Working..." : "Run AI Agent"}
+        </button>
+
+        {txHash && (
+          <p style={{ marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
+            Tx: {txHash}
+          </p>
         )}
-      </section>
+
+        {analysis && <pre style={{ marginTop: 12 }}>{analysis}</pre>}
+      </div>
+    </>
+  )}
+
+  {/* 📊 CRYPTO AI VIEW */}
+  {view === "crypto" && (
+    <>
+      <h2 className="section-title" style={{ marginTop: 24 }}>
+        Crypto AI
+      </h2>
+
+      <CryptoChart coin="bitcoin" />
+      <CoinGeckoDashboard userAddress={address} />
+    </>
+  )}
+</section>
+
 
       {/* FOOTER */}
       <div className="footer">
