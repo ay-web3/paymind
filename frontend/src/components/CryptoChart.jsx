@@ -884,7 +884,9 @@ if (!candles.length) {
             borderRadius: "50%", 
             animation: "spin 0.6s linear infinite" 
           }} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: "#71717a", letterSpacing: "1px" }}>SYNCING...</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: "#71717a", letterSpacing: "1px" }}>SYNCING...
+            PAYING X402 ACCESS
+          </span>
         </div>
       )}
 
@@ -903,7 +905,7 @@ if (!candles.length) {
       />
     </div>
     {/* ───────────────── RSI ───────────────── */}
-    <div style={{ height: 120, borderTop: "1px solid #18181b", background: "#09090b" }}>
+    <div style={{ height: 150, borderTop: "1px solid #18181b", background: "#09090b" }}>
       <div style={{ padding: "8px 16px", fontSize: 9, color: "#3f3f46", fontWeight: 800, letterSpacing: "0.5px" }}>
         RELATIVE STRENGTH INDEX (14)
       </div>

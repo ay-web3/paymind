@@ -18,7 +18,8 @@ export default function CoinGeckoDashboard({ userAddress }) {
   const [portfolio, setPortfolio] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
-
+  const [trace, setTrace] = useState([]);
+  const [txHash, setTxHash] = useState("");
   /* ======================
      Load preset coins
   ====================== */
@@ -119,39 +120,103 @@ export default function CoinGeckoDashboard({ userAddress }) {
   ====================== */
 
   async function analyze() {
-    if (!selectedCoin && mode !== "portfolio") {
-      alert("Select a coin first");
-      return;
+  if (!selectedCoin && mode !== "portfolio") {
+    alert("Select a coin first");
+    return;
+  }
+
+  setLoading(true);
+  setAnalysis(null);
+  setTxHash("");
+  setTrace([]);
+
+  // staged UI steps while waiting (fake “progress”)
+  const steps = [
+    "Paying x402...",
+    "Payment sent...",
+    "Verifying payment...",
+    "Fetching market info...",
+    "Generating analysis...",
+  ];
+
+  // Use a ref instead of a local boolean so it actually persists
+  // across awaits and re-renders (local variables are fragile here).
+  if (!window.__cryptoAnalyzeCancelRef) window.__cryptoAnalyzeCancelRef = { current: false };
+  const cancelRef = window.__cryptoAnalyzeCancelRef;
+
+  // cancel any previous in-flight staged loop
+  cancelRef.current = true;
+  cancelRef.current = false;
+
+  let idx = 0;
+  let timer = null;
+
+  const tick = () => {
+    if (cancelRef.current) return;
+
+    if (idx < steps.length) {
+      setTrace((prev) => [...prev, { t: Date.now(), m: steps[idx] }]);
+      idx += 1;
+      timer = setTimeout(tick, 700);
+    }
+  };
+
+  tick();
+
+  try {
+    const res = await fetch(`${API_BASE}/ai/crypto-analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userAddress,
+        coinId: selectedCoin?.id || null,
+        mode,
+        preset,
+        customQuery,
+        portfolio: portfolio.map((c) => c.id),
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (data?.txHash) {
+      setTxHash(data.txHash);
+      setTrace((prev) => [
+        ...prev,
+        { t: Date.now(), m: "Tx received. Verifying on-chain..." },
+      ]);
     }
 
-    setLoading(true);
-    setAnalysis(null);
+    if (!res.ok) throw new Error(data?.error || "AI request failed");
 
-    try {
-      const res = await fetch(`${API_BASE}/ai/crypto-analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userAddress,
-          coinId: selectedCoin?.id || null,
-          mode,
-          preset,
-          customQuery,
-          portfolio: portfolio.map(c => c.id)
-        })
-      });
+    // stop staged steps
+    cancelRef.current = true;
+    if (timer) clearTimeout(timer);
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      setAnalysis(data.analysis);
-    } catch (err) {
-      alert("AI request failed");
-      console.error(err);
+    // if server sends trace, prefer it; else finalize nicely
+    if (Array.isArray(data?.trace) && data.trace.length) {
+      setTrace(data.trace);
+    } else {
+      setTrace((prev) => [...prev, { t: Date.now(), m: "Done." }]);
     }
 
+    setAnalysis(data.analysis);
+  } catch (err) {
+    cancelRef.current = true;
+    if (timer) clearTimeout(timer);
+
+    setTrace((prev) => [
+      ...prev,
+      { t: Date.now(), m: `Error: ${err?.message || "failed"}` },
+    ]);
+
+    alert(err?.message || "AI request failed");
+  } finally {
     setLoading(false);
   }
+}
+
+
 
   /* ======================
      UI
@@ -194,14 +259,7 @@ export default function CoinGeckoDashboard({ userAddress }) {
     </div>
 
     {/* ===== Main Layout ===== */}
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "420px 1fr",
-        gap: 20,
-        marginTop: 16
-      }}
-    >
+    <div className="crypto-layout">
       {/* ===== Left Panel ===== */}
       <div className="glass-card" style={{ padding: 16 }}>
         <h4>Select Coin</h4>
@@ -297,6 +355,56 @@ export default function CoinGeckoDashboard({ userAddress }) {
         >
           {loading ? "Running AI..." : "Run Crypto AI (x402)"}
         </button>
+        {/* ===============================
+    Thinking / Trace Console
+============================== */}
+<div
+  style={{
+    marginTop: 12,
+    background: "#020617",
+    border: "1px solid rgba(255,255,255,0.10)",
+    borderRadius: 10,
+    padding: 12,
+    maxHeight: 180,
+    overflow: "auto",
+    fontFamily: "monospace",
+    fontSize: 12,
+    lineHeight: 1.5,
+    opacity: trace.length ? 1 : 0.6,
+  }}
+>
+  {!trace.length ? (
+    <div>Waiting...</div>
+  ) : (
+    trace.map((x, i) => (
+      <div key={i}>
+        {/* optional timestamp */}
+        {/* <span style={{ opacity: 0.5, marginRight: 6 }}>
+          {new Date(x.t).toLocaleTimeString()}
+        </span> */}
+        {x?.m || ""}
+      </div>
+    ))
+  )}
+</div>
+
+{/* ===============================
+    Transaction Link
+============================== */}
+{txHash && (
+  <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
+    Tx:&nbsp;
+    <a
+      href={`https://testnet.arcscan.app/tx/${txHash}`}
+      target="_blank"
+      rel="noreferrer"
+      style={{ color: "var(--cyan)" }}
+    >
+      Open in Explorer
+    </a>
+  </div>
+)}
+
 
         {/* Portfolio */}
         {portfolio.length > 0 && (

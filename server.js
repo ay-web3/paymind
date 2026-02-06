@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config();
-
+import { buildTradePlan } from "./services/tradePlan.js";
 import express from "express";
 import { analyzeMarketStructure } from "./services/marketStructure.js";
 import { ethers } from "ethers";
@@ -52,9 +52,7 @@ const ARC_RPC_URL = "https://rpc.testnet.arc.network";
 const X402_CONTRACT_ADDRESS = "0x12d6DaaD7d9f86221e5920E7117d5848EC0528e6";
 const AGENT_MANAGER_ADDRESS = process.env.AGENT_MANAGER_ADDRESS;
 
-console.log("X402_CONTRACT_ADDRESS:", X402_CONTRACT_ADDRESS);
-console.log("USDC_ADDRESS:", process.env.USDC_ADDRESS);
-console.log("AGENT_MANAGER_ADDRESS:", AGENT_MANAGER_ADDRESS);
+
 
 /* =======================
    BLOCKCHAIN
@@ -62,7 +60,7 @@ console.log("AGENT_MANAGER_ADDRESS:", AGENT_MANAGER_ADDRESS);
 
 const provider = new ethers.JsonRpcProvider(ARC_RPC_URL);
 const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-console.log("Backend signer address:", await signer.getAddress());
+
 const agentProvider = new ethers.JsonRpcProvider(ARC_RPC_URL);
 
 
@@ -224,9 +222,11 @@ async function callGemini(prompt) {
   const token = await getAccessToken();
 
   const PROJECT_ID = "my-project-ay-63015";
-  const LOCATION = "us-central1";
+  const LOCATION = "global"; 
+  const MODEL_ID = "gemini-3-pro-preview";
 
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/gemini-2.0-flash-001:generateContent`;
+  
+  const url = `https://aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL_ID}:generateContent`;
 
   const res = await fetch(url, {
     method: "POST",
@@ -235,15 +235,37 @@ async function callGemini(prompt) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        maxOutputTokens: 2048,
+        temperature: 1.0,
+      },
     }),
   });
 
   const data = await res.json();
-  if (!data.candidates) throw new Error("Gemini failed");
 
-  return data.candidates[0].content.parts[0].text;
+  if (!res.ok) {
+    throw new Error(
+      `Gemini failed (${res.status}): ${JSON.stringify(data)}`
+    );
+  }
+
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error(
+      "Gemini returned no text: " + JSON.stringify(data)
+    );
+  }
+
+  return text;
 }
+
 
 async function initMemeCoins() {
   const coins = await loadMemeCoins(300);
@@ -252,6 +274,36 @@ async function initMemeCoins() {
 }
 
 await initMemeCoins();
+
+async function resolveCoinGeckoId(query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return null;
+
+  const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`;
+
+  const res = await fetch(url, {
+    headers: { "x-cg-demo-api-key": process.env.COINGECKO_API_KEY },
+  });
+  if (!res.ok) throw new Error("CoinGecko search failed");
+
+  const data = await res.json();
+  const coins = data?.coins || [];
+  if (!coins.length) return null;
+
+  const exact =
+    coins.find(c => String(c.symbol || "").toLowerCase() === q) ||
+    coins.find(c => String(c.name || "").toLowerCase() === q);
+
+  const top = exact || coins[0];
+
+  return {
+    coinId: top.id,
+    name: top.name,
+    symbol: top.symbol,
+    rank: top.market_cap_rank ?? null,
+  };
+}
+
 
 /* =======================
    EXPRESS
@@ -289,6 +341,19 @@ app.get("/crypto/live-price", async (req, res) => {
   }
 });
 
+app.get("/crypto/resolve", async (req, res) => {
+  try {
+    const query = (req.query.query || "").trim();
+    if (!query) return res.status(400).json({ error: "Missing query" });
+
+    const result = await resolveCoinGeckoId(query);
+    if (!result) return res.status(404).json({ error: "Coin not found" });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Resolve failed" });
+  }
+});
 /* =======================
    X402 VERIFICATION
 ======================= */
@@ -411,6 +476,7 @@ STRICT RULES:
 - Avoid repetitive phrasing. Vary wording naturally.
 - Mention confidence and invalidation when provided.
 - If mtf is present, include one line about alignment/conflict.
+- If tradePlan exists, include Entry, SL, TP1, and the invalidation in 2 lines max.
 
 FACTS(JSON):
 ${JSON.stringify(facts)}
@@ -453,7 +519,6 @@ app.get("/search-product", (req, res) => {
     ids
   });
 });
-
 
 
 app.post("/analysis", async (req, res) => {
@@ -620,6 +685,17 @@ if (htfTf) {
       mtf
     });
     
+    const tradePlan = buildTradePlan({
+  candles,
+  price: livePrice,
+  structure,
+  zones: normalizedZones,
+  emaDist: distanceToEMA,
+  vwapDist: distanceToVWAP,
+  rsiValue: rsi,
+  invalidation
+});
+
     function getHigherTf(tf) {
   // LTF -> HTF mapping
   if (tf === "1h") return "1d";
@@ -709,6 +785,8 @@ function computeMtfAlignment(ltfBias, htfBias) {
       invalidation
     };
 
+    facts.tradePlan = tradePlan;
+
     /* 8) AI NARRATION (FLEXIBLE WORDING, NO INVENTING) */
     const explanation = await narrateFacts(callGemini, facts);
 
@@ -729,6 +807,7 @@ function computeMtfAlignment(ltfBias, htfBias) {
         mtf,            // ✅ add this
         confidence,
         invalidation,
+        tradePlan,
         zones: normalizedZones,
         nearestZone,
 
@@ -956,55 +1035,128 @@ app.post("/ai-query", async (req, res) => {
       `https://dummyjson.com/comments?limit=20`
     ).then(r => r.json());
 
-    // 4. Build prompt
-    let prompt = "";
+    // ===============================
+// STRICT SYSTEM RULES (GLOBAL)
+// ===============================
+const SYSTEM_RULES = `
+You are an AI analyst operating inside a professional terminal UI.
 
-    if (finalMode === "Analyze profitability") {
-      prompt = `
-Give a short profitability analysis.
+STRICT OUTPUT RULES (MANDATORY):
+- Plain text only (NO markdown, NO **, NO emojis)
+- Max 8 lines total
+- Each line under 120 characters
+- Short, direct, professional tone
+- No introductions, no conclusions, no filler
+- Do NOT restate the product JSON
+- Do NOT explain your reasoning
 
-Product:
-${JSON.stringify(product, null, 2)}
+FORMAT (must match exactly):
+
+SUMMARY:
+<one sentence>
+
+KEY POINTS:
+- <short point>
+- <short point>
+- <short point>
+
+RISK:
+<one short sentence>
+
+ACTION:
+<one short sentence>
 `;
-    }
-    else if (finalMode === "Analyze sentiment") {
-      prompt = `
-Analyze customer sentiment and risks.
 
-Product:
-${JSON.stringify(product, null, 2)}
-`;
-    }
-    else if (finalMode === "Generate marketing ideas") {
-      prompt = `
-Generate marketing ideas for this product.
+// ===============================
+// PROMPT BUILDER
+// ===============================
+let prompt = "";
 
-Product:
-${JSON.stringify(product, null, 2)}
+if (finalMode === "Analyze profitability") {
+  prompt = `
+${SYSTEM_RULES}
+
+TASK:
+Assess product profitability using pricing, reviews, demand signals, and risk.
+
+Focus on:
+- Revenue potential
+- Margin or cost pressure
+- Scalability constraints
+
+Product Data:
+${JSON.stringify(product)}
 `;
-    }
-    else if (finalMode === "Custom research") {
-      prompt = `
-User custom request:
+}
+
+else if (finalMode === "Analyze sentiment") {
+  prompt = `
+${SYSTEM_RULES}
+
+TASK:
+Assess customer sentiment and reputation risk.
+
+Focus on:
+- Overall satisfaction
+- Repeated complaints
+- Trust or quality signals
+
+Product Data:
+${JSON.stringify(product)}
+`;
+}
+
+else if (finalMode === "Generate marketing ideas") {
+  prompt = `
+${SYSTEM_RULES}
+
+TASK:
+Generate practical marketing angles for this product.
+
+Focus on:
+- Target audience
+- Core selling angle
+- One clear campaign idea
+
+Product Data:
+${JSON.stringify(product)}
+`;
+}
+
+else if (finalMode === "Custom research") {
+  prompt = `
+${SYSTEM_RULES}
+
+TASK:
+Answer the user's request using ONLY the product data.
+
+User Request:
 ${customQuery}
 
-Rules:
-- Use ONLY the product data
-- Be concise
-- No filler
+Constraints:
+- Do not speculate
+- If data is insufficient, say so clearly
 
-Product:
-${JSON.stringify(product, null, 2)}
+Product Data:
+${JSON.stringify(product)}
 `;
-    }
-    else {
-      prompt = `
-User task: ${finalMode}
+}
 
-Product:
-${JSON.stringify(product, null, 2)}
+else {
+  prompt = `
+${SYSTEM_RULES}
+
+TASK:
+Perform the requested analysis.
+
+User Task:
+${finalMode}
+
+Product Data:
+${JSON.stringify(product)}
 `;
-    }
+}
+
 
     // 5. AI
     const analysis = await callGemini(prompt);
@@ -1038,67 +1190,226 @@ app.get("/price/:coin", async (req, res) => {
 });  
 
 app.post("/ai/crypto-analyze", async (req, res) => {
+  // Trace collector (frontend can render like a console)
+  const trace = [];
+  const t0 = Date.now();
+
+  const log = (m) => {
+    // keep trace lightweight + safe
+    const msg = String(m ?? "");
+    trace.push({ t: Date.now(), dt: Date.now() - t0, m: msg.slice(0, 240) });
+    if (trace.length > 80) trace.shift(); // prevent unbounded growth
+  };
+
+  let txHash = "";
+
   try {
-    const { userAddress, coinId, mode, preset, portfolio, customQuery } = req.body;
+    const {
+      userAddress,
+      coinId,
+      mode = "general",
+      preset,
+      portfolio,
+      customQuery,
+    } = req.body || {};
+
+    log("Request received");
 
     if (!userAddress) {
-      return res.status(400).json({ error: "Missing userAddress" });
+      log("Missing userAddress");
+      return res.status(400).json({ error: "Missing userAddress", trace });
     }
 
     if (!coinId && mode !== "portfolio") {
-      return res.status(400).json({ error: "coinId required" });
+      log("coinId required (mode is not portfolio)");
+      return res.status(400).json({ error: "coinId required", trace });
     }
 
-    // 1️⃣ Charge user via x402
-    const PRODUCT_ID = 3; // virtual product id for crypto AI
+    /* =========================
+       1) Charge user via x402
+    ========================= */
 
-    const txHash = await agentPayForAccess(
+    const PRODUCT_ID = 3; // virtual product id for crypto AI
+    log("Paying x402...");
+
+    txHash = await agentPayForAccess(
       userAddress,
       PRODUCT_ID,
       `crypto:${mode}`,
       PRODUCT_PRICE
     );
 
-    // 2️⃣ Verify payment
-    const isValid = await verifyContractPayment(txHash, PRODUCT_ID, PRODUCT_PRICE);
+    log(`Paid. tx=${txHash}`);
+
+    /* =========================
+       2) Verify payment
+    ========================= */
+
+    log("Verifying payment...");
+    const isValid = await verifyContractPayment(
+      txHash,
+      PRODUCT_ID,
+      PRODUCT_PRICE
+    );
+
     if (!isValid) {
-      return res.status(402).json({ error: "Payment failed" });
+      log("Payment verification failed");
+      return res.status(402).json({ error: "Payment failed", txHash, trace });
     }
 
-    // 3️⃣ Build crypto data
+    log("Payment verified ✅");
+
+    /* =========================
+       3) Build context
+    ========================= */
+
+    log("Getting market info...");
     let context = "";
 
     if (mode === "portfolio") {
-      context = `Portfolio coins: ${portfolio.join(", ")}`;
+      const list = Array.isArray(portfolio) ? portfolio.filter(Boolean) : [];
+
+      if (!list.length) {
+        log("Portfolio is empty");
+        return res
+          .status(400)
+          .json({ error: "Portfolio is empty", txHash, trace });
+      }
+
+      context = `PORTFOLIO_IDS=${list.join(",")}`;
+      log(`Portfolio loaded (${list.length} coins)`);
     } else {
       const price = await getCoinPrice(coinId);
-      context = `Coin: ${coinId}, Current price: $${price}`;
+      const safePrice = Number.isFinite(Number(price))
+        ? Number(price).toFixed(6)
+        : String(price);
+
+      context = `COIN_ID=${coinId}\nPRICE_USD=${safePrice}`;
+      log(`Price fetched: ${safePrice} USD`);
     }
 
+    /* =========================
+       4) Strict terminal rules
+    ========================= */
+
+    const SYSTEM_RULES = `
+You are an AI analyst operating inside a professional terminal UI.
+
+STRICT OUTPUT RULES (MANDATORY):
+- Plain text only (NO markdown, NO **, NO emojis)
+- Max 8 lines total
+- Each line under 120 characters
+- Short, direct, professional tone
+- No introductions, no conclusions, no filler
+- Do NOT explain your reasoning
+- If data is insufficient, say "INSUFFICIENT_DATA" on the SUMMARY line
+
+FORMAT (must match exactly):
+
+SUMMARY:
+<one sentence>
+
+KEY POINTS:
+- <short point>
+- <short point>
+- <short point>
+
+RISK:
+<one short sentence>
+
+ACTION:
+<one short sentence>
+`.trim();
+
+    /* =========================
+       5) Mode-specific task
+    ========================= */
+
+    function buildTask(mode) {
+      switch (mode) {
+        case "general":
+          return "Assess current market state and give a clean trade plan with conditions.";
+        case "volatility":
+          return "Assess volatility regime and risk conditions. Focus on position sizing.";
+        case "crash":
+          return "Assess crash-risk signals and downside scenarios. Focus on defense.";
+        case "longterm":
+          return "Assess long-term regime. Focus on accumulate vs wait.";
+        case "meme":
+          return "Assess meme-coin risk: hype cycles, liquidity risk, sharp drawdowns.";
+        case "portfolio":
+          return "Assess portfolio-level risk: diversification and overlap. No price targets.";
+        case "debate":
+          return "Provide bull vs bear view with one decisive action.";
+        case "backtest":
+          return "Propose a simple testable ruleset without claiming results.";
+        case "custom":
+          return "Answer the user request using only the provided context.";
+        default:
+          return "Assess market state and give a clean plan.";
+      }
+    }
+
+    const task = buildTask(mode);
+
+    /* =========================
+       6) Prompt
+    ========================= */
+
     const prompt = `
-You are a professional crypto analyst.
+${SYSTEM_RULES}
 
-Mode: ${mode}
+TASK:
+${task}
 
+CONTEXT:
+Mode=${mode}
+Preset=${preset || "unknown"}
 ${context}
+${
+  customQuery
+    ? `UserRequest=${String(customQuery).replace(/\s+/g, " ").slice(0, 400)}`
+    : ""
+}
+`.trim();
 
-${customQuery ? "User request: " + customQuery : ""}
+    /* =========================
+       7) AI call
+    ========================= */
 
-Be concise and actionable.
-`;
+    log("Running AI...");
+    const raw = await callGemini(prompt);
+    log("AI completed ✅");
 
-    // 4️⃣ AI
-    const analysis = await callGemini(prompt);
+    /* =========================
+       8) Hard sanitize output
+    ========================= */
 
-    res.json({
-      txHash,
-      analysis
-    });
+    function sanitizeTerminalText(text) {
+      return String(text || "")
+        .replace(/\r/g, "")
+        .replace(/\*\*/g, "")
+        .replace(/\*/g, "")
+        .replace(/#+/g, "")
+        .replace(/[•]/g, "-")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim()
+        .slice(0, 1400);
+    }
+
+    const analysis = sanitizeTerminalText(raw);
+
+    log("Done");
+    return res.json({ txHash, analysis, trace });
   } catch (err) {
+    const msg = err?.reason || err?.message || "Unknown error";
+    log(`Error: ${msg}`);
     console.error("Crypto AI error:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: msg, txHash, trace });
   }
 });
+
+
 
 /* =======================
    EXTRA AI ENDPOINTS 
