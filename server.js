@@ -205,7 +205,7 @@ async function agentPayForAccess(userAddress, productId, task, priceUSDC) {
 ======================= */
 
 const auth = new GoogleAuth({
-  credentials: JSON.parse(fs.readFileSync("./secrets/gemini-sa.json", "utf8")),
+  credentials: JSON.parse(process.env.GEMINI_SA_JSON),
   scopes: [
     "https://www.googleapis.com/auth/cloud-platform",
     "https://www.googleapis.com/auth/generative-language"
@@ -314,6 +314,18 @@ async function resolveCoinGeckoId(query) {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: "paymind-api",
+    time: new Date().toISOString(),
+  });
+});
+
+
 
 app.get("/", (_, res) => res.send("Agentic Commerce AI API running"));
 
