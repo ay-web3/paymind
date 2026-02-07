@@ -21,6 +21,7 @@ import zoomPlugin from "chartjs-plugin-zoom";
 import { Chart } from "react-chartjs-2";
 import "chartjs-adapter-date-fns";
 import { Filler } from "chart.js";
+import TradePlanCard from "./TradePlanCard";
 
 
 ChartJS.register(
@@ -653,7 +654,7 @@ if (!candles.length) {
   <div
     className="sv-terminal-v2"
     style={{
-      height: 800,
+      height: 900,
       background: "#09090b",
       borderRadius: 16,
       border: "1px solid #27272a",
@@ -662,7 +663,7 @@ if (!candles.length) {
       fontFamily: "'Inter', sans-serif",
       color: "#fafafa",
       boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-      overflow: "hidden"
+      overflow: "hidden", // ✅ outer container should NOT scroll
     }}
   >
     {/* ───────────────── COMPACT HEADER ───────────────── */}
@@ -673,28 +674,41 @@ if (!candles.length) {
         alignItems: "center",
         padding: "10px 16px",
         background: "#09090b",
-        borderBottom: "1px solid #18181b"
+        borderBottom: "1px solid #18181b",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: "#a1a1aa" }}>
           {coin.toUpperCase()}/USD
         </span>
+
         <span style={{ fontSize: 13, fontWeight: 700 }}>
-          ${livePrice?.toLocaleString()}
+          ${livePrice?.toLocaleString?.() ?? livePrice}
         </span>
-        <span style={{ 
-          fontSize: 11, 
-          fontWeight: 600, 
-          color: priceChange24h >= 0 ? "#10b981" : "#ef4444" 
-        }}>
-          {priceChange24h >= 0 ? "+" : ""}{priceChange24h.toFixed(2)}%
+
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: (priceChange24h ?? 0) >= 0 ? "#10b981" : "#ef4444",
+          }}
+        >
+          {(priceChange24h ?? 0) >= 0 ? "+" : ""}
+          {Number.isFinite(priceChange24h) ? priceChange24h.toFixed(2) : "0.00"}%
         </span>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <div style={{ display: "flex", background: "#18181b", padding: 2, borderRadius: 8, border: "1px solid #27272a" }}>
-          {["1h", "1d", "7d"].map(tf => (
+        <div
+          style={{
+            display: "flex",
+            background: "#18181b",
+            padding: 2,
+            borderRadius: 8,
+            border: "1px solid #27272a",
+          }}
+        >
+          {["1h", "1d", "7d"].map((tf) => (
             <button
               key={tf}
               onClick={() => setTimeframe(tf)}
@@ -706,13 +720,14 @@ if (!candles.length) {
                 fontSize: 11,
                 fontWeight: 500,
                 cursor: "pointer",
-                borderRadius: 6
+                borderRadius: 6,
               }}
             >
               {tf.toUpperCase()}
             </button>
           ))}
         </div>
+
         <button
           onClick={load}
           style={{
@@ -726,8 +741,9 @@ if (!candles.length) {
             fontSize: 12,
             display: "flex",
             alignItems: "center",
-            justifyContent: "center"
+            justifyContent: "center",
           }}
+          title="Refresh"
         >
           ↻
         </button>
@@ -735,244 +751,367 @@ if (!candles.length) {
     </div>
 
     {/* ───────────────── STRUCTURE & OHLC BAR ───────────────── */}
-    <div style={{ 
-      display: "flex", 
-      alignItems: "center",
-      padding: "8px 16px", 
-      gap: 16, 
-      background: "#09090b", 
-      borderBottom: "1px solid #18181b",
-    }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        padding: "8px 16px",
+        gap: 16,
+        background: "#09090b",
+        borderBottom: "1px solid #18181b",
+      }}
+    >
       {/* MARKET STRUCTURE */}
-<div
-  style={{
-    display: "flex",
-    alignItems: "center",
-    gap: 14,
-    paddingRight: 16,
-    borderRight: "1px solid #27272a"
-  }}
->
-  {/* Status dot */}
-  <div
-    style={{
-      width: 8,
-      height: 8,
-      borderRadius: "50%",
-      background:
-        structure?.bias === "bullish"
-          ? "#10b981"
-          : structure?.bias === "bearish"
-          ? "#ef4444"
-          : "#eab308",
-      boxShadow: `0 0 6px ${
-        structure?.bias === "bullish"
-          ? "rgba(16,185,129,0.35)"
-          : structure?.bias === "bearish"
-          ? "rgba(239,68,68,0.35)"
-          : "rgba(234,179,8,0.35)"
-      }`
-    }}
-  />
-
-  {/* STRUCTURE text */}
-  <span
-    style={{
-      fontSize: 10,
-      fontWeight: 700,
-      letterSpacing: "0.6px",
-      color: "#e4e4e7"
-    }}
-  >
-    STRUCTURE:
-    <span
-      style={{
-        marginLeft: 6,
-        color:
-          structure?.bias === "bullish"
-            ? "#10b981"
-            : structure?.bias === "bearish"
-            ? "#ef4444"
-            : "#eab308"
-      }}
-    >
-      {structure?.bias?.toUpperCase() || "RANGING"}
-    </span>
-  </span>
-{analysis?.mtf?.enabled && (
-  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.6px", color: "#a1a1aa" }}>
-    MTF:
-    <span style={{ marginLeft: 6, color: analysis.mtf.aligned ? "#10b981" : "#ef4444" }}>
-      {analysis.mtf.htfTf.toUpperCase()} {analysis.mtf.htfBias.toUpperCase()} ({analysis.mtf.status})
-    </span>
-  </span>
-)}
-  {/* EVENT text */}
-  {structure?.event && (
-    <span
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: "0.6px",
-        color: "#a1a1aa"
-      }}
-    >
-      EVENT:
-      <span
+      <div
         style={{
-          marginLeft: 6,
-          color:
-            structure.event.direction === "bullish"
-              ? "#10b981"
-              : "#ef4444"
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          paddingRight: 16,
+          borderRight: "1px solid #27272a",
+          flexWrap: "wrap",
         }}
       >
-        {structure.event.type.toUpperCase()}
-      </span>
-    </span>
-  )}
-</div>
-
-
-      {/* OHLC DATA */}
-      <div style={{ display: "flex", gap: 12, fontSize: 10, fontWeight: 500, color: "#71717a" }}>
-        <span>O <span style={{color: "#e4e4e7"}}>{currentPrice?.toLocaleString()}</span></span>
-        <span>H <span style={{color: "#e4e4e7"}}>{currentPrice?.toLocaleString()}</span></span>
-        <span>L <span style={{color: "#e4e4e7"}}>{currentPrice?.toLocaleString()}</span></span>
-        <span>C <span style={{color: "#e4e4e7"}}>{currentPrice?.toLocaleString()}</span></span>
-      </div>
-    </div>
-
-    {/* ───────────────── MAIN CHART ───────────────── */}
-    <div style={{ flex: 1, position: "relative", cursor: "crosshair" }}>
-      
-      {/* TRADINGVIEW STYLE PRICE LABEL */}
-      <div style={{
-        position: "absolute",
-        right: 0,
-        top: "42%",
-        zIndex: 10,
-        background: "#27272a",
-        color: "#ffffff",
-        padding: "2px 6px",
-        fontSize: 10,
-        fontWeight: 600,
-        border: "1px solid #3f3f46",
-        borderRadius: "2px 0 0 2px"
-      }}>
-        {livePrice?.toLocaleString()}
-      </div>
-
-      {/* LOADING OVERLAY */}
-      {paying && (
-        <div style={{
-          position: "absolute",
-          inset: 0,
-          background: "rgba(9, 9, 11, 0.85)",
-          backdropFilter: "blur(4px)",
-          zIndex: 50,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 12
-        }}>
-          <div style={{ 
-            width: 24, height: 24, 
-            border: "2px solid rgba(255,255,255,0.05)", 
-            borderTop: "2px solid #ffffff", 
-            borderRadius: "50%", 
-            animation: "spin 0.6s linear infinite" 
-          }} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: "#71717a", letterSpacing: "1px" }}>SYNCING...
-            PAYING X402 ACCESS
-          </span>
-        </div>
-      )}
-
-      <Chart
-        key={`price-${coin}-${timeframe}`}
-        data={chartData}
-        options={{
-          ...priceOptions,
-          layout: { background: { color: "transparent" }, textColor: "#71717a" },
-          grid: { 
-            vertLines: { color: "#18181b" }, 
-            horzLines: { color: "#18181b" } 
-          },
-          crosshair: { mode: 1 }
-        }}
-      />
-    </div>
-    {/* ───────────────── RSI ───────────────── */}
-    <div style={{ height: 150, borderTop: "1px solid #18181b", background: "#09090b" }}>
-      <div style={{ padding: "8px 16px", fontSize: 9, color: "#3f3f46", fontWeight: 800, letterSpacing: "0.5px" }}>
-        RELATIVE STRENGTH INDEX (14)
-      </div>
-      <Chart
-        key={`rsi-${coin}-${timeframe}`}
-        data={rsiChartData}
-        options={{
-          ...rsiOptions,
-          layout: { background: { color: "transparent" } },
-          grid: { vertLines: { visible: false }, horzLines: { color: "#18181b" } }
-        }}
-      />
-    </div>
-    
-    {hasPaid && aiExplanation && (
-  <div
-    style={{
-      maxHeight: 120,
-      overflowY: "auto",
-      padding: "10px 16px",
-      borderBottom: "1px solid #18181b",
-      background: "#09090b",
-      fontSize: 11,
-      lineHeight: 1.6,
-      color: "#a1a1aa"
-    }}
-  >
-    {aiExplanation.split("\n\n").map((p, i) => (
-      <p key={i} style={{ marginBottom: 8 }}>{p}</p>
-    ))}
-  </div>
-)}
-
-    
-
-    {/* ───────────────── FOOTER ───────────────── */}
-    {!hasPaid && (
-      <div style={{ padding: "12px 16px", borderTop: "1px solid #18181b", background: "#09090b" }}>
-        <button
-          onClick={unlockAnalysis}
-          disabled={paying}
+        <div
           style={{
-            width: "100%",
-            padding: "10px",
-            background: "transparent",
-            color: "#ffffff",
-            borderRadius: 8,
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.5px",
-            border: "1px solid #27272a",
-            cursor: "pointer",
-            transition: "all 0.15s ease"
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background:
+              structure?.bias === "bullish"
+                ? "#10b981"
+                : structure?.bias === "bearish"
+                ? "#ef4444"
+                : "#eab308",
+            boxShadow: `0 0 6px ${
+              structure?.bias === "bullish"
+                ? "rgba(16,185,129,0.35)"
+                : structure?.bias === "bearish"
+                ? "rgba(239,68,68,0.35)"
+                : "rgba(234,179,8,0.35)"
+            }`,
           }}
-          onMouseOver={(e) => {
-            e.target.style.background = "#ffffff";
-            e.target.style.color = "#000000";
-          }}
-          onMouseOut={(e) => {
-            e.target.style.background = "transparent";
-            e.target.style.color = "#ffffff";
+        />
+
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.6px",
+            color: "#e4e4e7",
           }}
         >
-          {paying ? "VERIFYING ACCESS..." : "REQUEST INSTITUTIONAL ANALYSIS"}
-        </button>
+          STRUCTURE:
+          <span
+            style={{
+              marginLeft: 6,
+              color:
+                structure?.bias === "bullish"
+                  ? "#10b981"
+                  : structure?.bias === "bearish"
+                  ? "#ef4444"
+                  : "#eab308",
+            }}
+          >
+            {structure?.bias?.toUpperCase?.() || "RANGING"}
+          </span>
+        </span>
+
+        {analysis?.mtf?.enabled && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.6px",
+              color: "#a1a1aa",
+            }}
+          >
+            MTF:
+            <span
+              style={{
+                marginLeft: 6,
+                color: analysis.mtf.aligned ? "#10b981" : "#ef4444",
+              }}
+            >
+              {String(analysis.mtf.htfTf || "").toUpperCase()}{" "}
+              {String(analysis.mtf.htfBias || "").toUpperCase()} (
+              {analysis.mtf.status})
+            </span>
+          </span>
+        )}
+
+        {structure?.event && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.6px",
+              color: "#a1a1aa",
+            }}
+          >
+            EVENT:
+            <span
+              style={{
+                marginLeft: 6,
+                color:
+                  structure.event.direction === "bullish"
+                    ? "#10b981"
+                    : "#ef4444",
+              }}
+            >
+              {String(structure.event.type || "").toUpperCase()}
+            </span>
+          </span>
+        )}
       </div>
-    )}
+
+      {/* OHLC DATA */}
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          fontSize: 10,
+          fontWeight: 500,
+          color: "#71717a",
+          flexWrap: "wrap",
+        }}
+      >
+        <span>
+          O <span style={{ color: "#e4e4e7" }}>{currentPrice?.toLocaleString?.() ?? currentPrice}</span>
+        </span>
+        <span>
+          H <span style={{ color: "#e4e4e7" }}>{currentPrice?.toLocaleString?.() ?? currentPrice}</span>
+        </span>
+        <span>
+          L <span style={{ color: "#e4e4e7" }}>{currentPrice?.toLocaleString?.() ?? currentPrice}</span>
+        </span>
+        <span>
+          C <span style={{ color: "#e4e4e7" }}>{currentPrice?.toLocaleString?.() ?? currentPrice}</span>
+        </span>
+      </div>
+    </div>
+
+    {/* ✅ MAIN BODY: SIDE-BY-SIDE */}
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0, // ✅ allows children to scroll properly
+        display: "flex",
+        overflow: "hidden",
+      }}
+    >
+      {/* LEFT: Chart + RSI + AI explanation (scrolls) */}
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          borderRight: "1px solid #18181b",
+          overflow: "hidden",
+        }}
+      >
+        {/* LEFT SCROLL AREA */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
+          {/* ───────────────── MAIN CHART ───────────────── */}
+          <div style={{ height: 540, position: "relative", cursor: "crosshair" }}>
+            {/* TRADINGVIEW STYLE PRICE LABEL */}
+            <div
+              style={{
+                position: "absolute",
+                right: 0,
+                top: "42%",
+                zIndex: 10,
+                background: "#27272a",
+                color: "#ffffff",
+                padding: "2px 6px",
+                fontSize: 10,
+                fontWeight: 600,
+                border: "1px solid #3f3f46",
+                borderRadius: "2px 0 0 2px",
+              }}
+            >
+              {livePrice?.toLocaleString?.() ?? livePrice}
+            </div>
+
+            {/* LOADING OVERLAY */}
+            {paying && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(9, 9, 11, 0.85)",
+                  backdropFilter: "blur(4px)",
+                  zIndex: 50,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 12,
+                }}
+              >
+                <div
+                  style={{
+                    width: 24,
+                    height: 24,
+                    border: "2px solid rgba(255,255,255,0.05)",
+                    borderTop: "2px solid #ffffff",
+                    borderRadius: "50%",
+                    animation: "spin 0.6s linear infinite",
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "#71717a",
+                    letterSpacing: "1px",
+                    textAlign: "center",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  SYNCING...
+                  <br />
+                  PAYING X402 ACCESS
+                </span>
+              </div>
+            )}
+
+            <Chart
+              key={`price-${coin}-${timeframe}`}
+              data={chartData}
+              options={priceOptions}
+            />
+          </div>
+
+          {/* ───────────────── RSI ───────────────── */}
+          <div
+            style={{
+              height: 150,
+              borderTop: "1px solid #18181b",
+              background: "#09090b",
+            }}
+          >
+            <div
+              style={{
+                padding: "8px 16px",
+                fontSize: 9,
+                color: "#3f3f46",
+                fontWeight: 800,
+                letterSpacing: "0.5px",
+              }}
+            >
+              RELATIVE STRENGTH INDEX (14)
+            </div>
+
+            <div style={{ height: 110, padding: "0 8px 8px 8px" }}>
+              <Chart
+                key={`rsi-${coin}-${timeframe}`}
+                data={rsiChartData}
+                options={rsiOptions}
+              />
+            </div>
+          </div>
+
+          {/* ───────────────── AI EXPLANATION ───────────────── */}
+          {hasPaid && aiExplanation && (
+            <div
+              style={{
+                maxHeight: 160,
+                overflowY: "auto",
+                padding: "10px 16px",
+                borderTop: "1px solid #18181b",
+                background: "#09090b",
+                fontSize: 11,
+                lineHeight: 1.6,
+                color: "#a1a1aa",
+              }}
+            >
+              {aiExplanation.split("\n\n").map((p, i) => (
+                <p key={i} style={{ marginBottom: 8 }}>
+                  {p}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {/* When not paid, show pay button at bottom of left column */}
+          {!hasPaid && (
+            <div
+              style={{
+                padding: "12px 16px",
+                borderTop: "1px solid #18181b",
+                background: "#09090b",
+              }}
+            >
+              <button
+                onClick={unlockAnalysis}
+                disabled={paying}
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  background: "transparent",
+                  color: "#ffffff",
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.5px",
+                  border: "1px solid #27272a",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = "#ffffff";
+                  e.currentTarget.style.color = "#000000";
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = "#ffffff";
+                }}
+              >
+                {paying ? "VERIFYING ACCESS..." : "REQUEST INSTITUTIONAL ANALYSIS"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* RIGHT: Trade card (separate scroll, sticky option) */}
+      <div
+        style={{
+          width: 380,
+          minWidth: 320,
+          maxWidth: "30%",
+          padding: 16,
+          overflowY: "auto",
+          overflowX: "hidden",
+          background: "#09090b",
+        }}
+      >
+        {hasPaid ? (
+          <div style={{ position: "sticky", top: 12 }}>
+            <TradePlanCard
+              tradePlan={analysis?.tradePlan || analysis?.facts?.tradePlan}
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              border: "1px solid #27272a",
+              borderRadius: 12,
+              padding: 14,
+              color: "#a1a1aa",
+              fontSize: 12,
+              lineHeight: 1.5,
+              background: "rgba(255,255,255,0.02)",
+            }}
+          >
+            Trade plan unlocks after paid analysis.
+          </div>
+        )}
+      </div>
+    </div>
 
     <style>{`
       @keyframes spin { to { transform: rotate(360deg); } }

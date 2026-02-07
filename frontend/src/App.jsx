@@ -682,7 +682,7 @@ function productTitle(id) {
             Universal Agent Command
           </h3>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
-            Execute cross-functional tasks: "Analyze BTC 1h" or "red polish profitability"
+            Execute cross-functional tasks: "Show me BTC 1h" or "red polish profitability"
           </p>
         </div>
 

@@ -227,7 +227,7 @@ async function callGemini(prompt) {
 
   
   const url = `https://aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL_ID}:generateContent`;
-
+  const safePrompt = String(prompt || "").slice(0, 12000);
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -242,13 +242,15 @@ async function callGemini(prompt) {
         },
       ],
       generationConfig: {
-        maxOutputTokens: 2048,
-        temperature: 1.0,
+        maxOutputTokens: 8192,
+        temperature: 0.7,
       },
     }),
   });
 
   const data = await res.json();
+  const parts = data?.candidates?.[0]?.content?.parts;
+const text = Array.isArray(parts) ? parts.map(p => p?.text || "").join("").trim() : "";
 
   if (!res.ok) {
     throw new Error(
@@ -256,7 +258,7 @@ async function callGemini(prompt) {
     );
   }
 
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  
   if (!text) {
     throw new Error(
       "Gemini returned no text: " + JSON.stringify(data)
