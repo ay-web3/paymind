@@ -532,13 +532,13 @@ function productTitle(id) {
           onClick={() => setView("commerce")}
           className={view === "commerce" ? "active-link" : ""}
         >
-          Commerce AI
+          Commerce Agent
         </a>
         <a
           onClick={() => setView("crypto")}
           className={view === "crypto" ? "active-link" : ""}
         >
-          Crypto AI
+          Crypto Agent
         </a>
       </div>
 
@@ -661,10 +661,10 @@ function productTitle(id) {
           style={{ justifyContent: "flex-start", marginTop: "20px" }}
         >
           <button className="btn-glow" onClick={() => setView("commerce")}>
-            🛒 Commerce AI
+            🛒 Commerce Agent
           </button>
           <button className="btn-glow" onClick={() => setView("crypto")}>
-            📊 Crypto AI
+            📊 Crypto Agent
           </button>
         </div>
       </div>
@@ -1100,14 +1100,72 @@ function productTitle(id) {
       </div>
     </section>
 
-    <footer className="footer">
-      <div className="footer-inner">
-        <div className="logo" style={{ fontSize: "0.9rem", marginBottom: "10px" }}>
-          PayMind
-        </div>
-        <p>© 2026 Built for ARC Hackathon • Secured by Smart Contract</p>
+    <footer className="footer" style={{ padding: "40px 20px", borderTop: "1px solid #eaeaea", backgroundColor: "#fff" }}>
+  <div className="footer-inner" style={{ maxWidth: "1200px",maxHeight: "350px", margin: "0 auto", display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "30px" }}>
+    
+    {/* Brand Section */}
+    <div className="footer-brand" style={{ flex: "1 1 250px" }}>
+      <div className="logo" style={{ fontSize: "1.2rem", fontWeight: "700", marginBottom: "12px", color: "#111" }}>
+        PayMind
       </div>
-    </footer>
+      <p style={{ fontSize: "0.9rem", color: "#666", lineHeight: "1.5" }}>
+        Secure autonomous execution powered by smart contracts. 
+      </p>
+    </div>
+
+    {/* Navigation Links */}
+    <div className="footer-links" style={{ display: "flex", gap: "40px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <span style={{ fontWeight: "600", fontSize: "0.9rem", marginBottom: "4px" }}>Product</span>
+        <a href="#" style={{ fontSize: "0.85rem", color: "#666", textDecoration: "none" }}>Commerce Agent</a>
+        <a href="#" style={{ fontSize: "0.85rem", color: "#666", textDecoration: "none" }}>Crypto Agent</a>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <span style={{ fontWeight: "600", fontSize: "0.9rem", marginBottom: "4px" }}>ARC Network</span>
+        <a
+  href="https://faucet.circle.com/"
+  target="_blank"
+  rel="noopener noreferrer"
+  style={{ fontSize: "0.85rem", color: "#666", textDecoration: "none" }}
+>
+  Circle Faucet
+</a>
+        <a
+  href="https://testnet.arcscan.app/address/0x12d6DaaD7d9f86221e5920E7117d5848EC0528e6"
+  target="_blank"
+  rel="noopener noreferrer"
+  style={{ fontSize: "0.85rem", color: "#666", textDecoration: "none" }}
+>
+Contract
+</a>
+      </div>
+  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <span style={{ fontWeight: "600", fontSize: "0.9rem", marginBottom: "4px" }}>Contact</span>
+        <a
+  href="https://github.com/ay-web3"
+  target="_blank"
+  rel="noopener noreferrer"
+  style={{ fontSize: "0.85rem", color: "#666", textDecoration: "none" }}
+>
+  Github
+</a>
+        <a
+  href="https://x.com/OjoAyomideEmma4"
+  target="_blank"
+  rel="noopener noreferrer"
+  style={{ fontSize: "0.85rem", color: "#666", textDecoration: "none" }}
+>
+X
+</a>
+      </div>
+    </div>
+  </div>
+
+  <div className="footer-bottom" style={{ maxWidth: "1200px", margin: "40px auto 0", paddingTop: "20px", borderTop: "1px solid #eee", fontSize: "0.8rem", color: "#999", display: "flex", justifyContent: "space-between" }}>
+    <p>© 2026 PayMind Inc. All rights reserved.</p>
+    <p>Secured by Smart Contract</p>
+  </div>
+</footer>
   </>
 );
 }

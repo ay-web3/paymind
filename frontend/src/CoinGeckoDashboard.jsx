@@ -235,7 +235,7 @@ export default function CoinGeckoDashboard({ userAddress }) {
         padding: 12
       }}
     >
-      <h3 style={{ margin: 0 }}>📊 Crypto AI</h3>
+      <h3 style={{ margin: 0 }}>📊 Crypto Agent</h3>
 
       <div style={{ display: "flex", gap: 10 }}>
         <select value={preset} onChange={e => setPreset(e.target.value)}>
@@ -353,7 +353,7 @@ export default function CoinGeckoDashboard({ userAddress }) {
           disabled={loading || !userAddress}
           style={{ marginTop: 16, width: "100%" }}
         >
-          {loading ? "Running AI..." : "Run Crypto AI (x402)"}
+          {loading ? "Running AI..." : "Run Crypto Agent (x402)"}
         </button>
         {/* ===============================
     Thinking / Trace Console
@@ -429,7 +429,7 @@ export default function CoinGeckoDashboard({ userAddress }) {
     <div style={{ opacity: 0.6 }}>Select a coin to view chart</div>
   )}
 
-  <h4 style={{ marginTop: 20 }}>AI Result</h4>
+  <h4 style={{ marginTop: 20 }}>Agent Result</h4>
 
   {!analysis && <div style={{ opacity: 0.6 }}>Run analysis to see result...</div>}
 
