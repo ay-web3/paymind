@@ -15,8 +15,7 @@ import {
   AGENT_MANAGER_ABI,
 } from "./contract";
 import { getAgentOwner, ownerWithdrawUSDC } from "./onchain/agentWallet";
-const API_BASE =
-  "http://34.172.199.194:3000";
+const API_BASE = "/api";
 
 function shortAddr(addr) {
   if (!addr) return "";

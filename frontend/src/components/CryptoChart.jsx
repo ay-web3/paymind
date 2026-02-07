@@ -41,8 +41,7 @@ ChartJS.register(
   Filler
 );
 
-const API_BASE =
-  "http://34.172.199.194:3000";
+const API_BASE = "/api";
 
 
 
