@@ -104,6 +104,17 @@ useEffect(() => {
   const [livePrice, setLivePrice] = useState(null);
   const [vwap, setVwap] = useState([]);
   const [aiExplanation, setAiExplanation] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+  const mq = window.matchMedia("(max-width: 900px)");
+  const update = () => setIsMobile(mq.matches);
+
+  update();
+  mq.addEventListener("change", update);
+
+  return () => mq.removeEventListener("change", update);
+}, []);
+
   useEffect(() => {
   setTimeframe(initialTimeframe);
 }, [initialTimeframe]);
@@ -170,7 +181,15 @@ useEffect(() => {
     return () => clearInterval(id);
   }, [coin, timeframe]);
 
-
+  useEffect(() => {
+  // reset paid/analysis state when coin or timeframe changes
+  setHasPaid(false);
+  setAnalysis(null);
+  setAiExplanation("");
+  setVwap([]);
+  setZones([]);
+  setLocked(true);
+}, [coin, timeframe]);
 
   async function unlockAnalysis() {
   try {
@@ -891,15 +910,16 @@ if (!candles.length) {
       </div>
     </div>
 
-    {/* ✅ MAIN BODY: SIDE-BY-SIDE */}
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0, // ✅ allows children to scroll properly
-        display: "flex",
-        overflow: "hidden",
-      }}
-    >
+    {/* ✅ MAIN BODY: RESPONSIVE */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          overflow: "hidden",
+          flexDirection: isMobile ? "column" : "row",
+        }}
+      >
       {/* LEFT: Chart + RSI + AI explanation (scrolls) */}
       <div
         style={{
@@ -908,14 +928,15 @@ if (!candles.length) {
           display: "flex",
           flexDirection: "column",
           minHeight: 0,
-          borderRight: "1px solid #18181b",
+          borderRight: isMobile ? "none" : "1px solid #18181b",
+            borderBottom: isMobile ? "1px solid #18181b" : "none",
           overflow: "hidden",
         }}
       >
         {/* LEFT SCROLL AREA */}
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
           {/* ───────────────── MAIN CHART ───────────────── */}
-          <div style={{ height: 540, position: "relative", cursor: "crosshair" }}>
+          <div style={{ height: isMobile ? 360 : 540, position: "relative", cursor: "crosshair" }}>
             {/* TRADINGVIEW STYLE PRICE LABEL */}
             <div
               style={{
@@ -1079,18 +1100,18 @@ if (!candles.length) {
 
       {/* RIGHT: Trade card (separate scroll, sticky option) */}
       <div
-        style={{
-          width: 380,
-          minWidth: 320,
-          maxWidth: "30%",
-          padding: 16,
-          overflowY: "auto",
-          overflowX: "hidden",
-          background: "#09090b",
-        }}
-      >
+          style={{
+            width: isMobile ? "100%" : 380,
+            minWidth: isMobile ? 0 : 320,
+            maxWidth: isMobile ? "100%" : "30%",
+            padding: 16,
+            overflowY: "auto",
+            overflowX: "hidden",
+            background: "#09090b",
+          }}
+        >
         {hasPaid ? (
-          <div style={{ position: "sticky", top: 12 }}>
+          <div style={{ position: isMobile ? "relative" : "sticky", top: 12 }}>
             <TradePlanCard
               tradePlan={analysis?.tradePlan || analysis?.facts?.tradePlan}
             />
