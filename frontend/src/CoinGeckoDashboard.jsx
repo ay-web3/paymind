@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import CryptoChart from "./components/CryptoChart";
 
-const API_BASE = "https://super-invention-qvp46rrwg67cxjvj-3000.app.github.dev";
+const API_BASE = "http://34.172.199.194:3000";
 
 export default function CoinGeckoDashboard({ userAddress }) {
   const [coins, setCoins] = useState([]);

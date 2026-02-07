@@ -16,7 +16,7 @@ import {
 } from "./contract";
 import { getAgentOwner, ownerWithdrawUSDC } from "./onchain/agentWallet";
 const API_BASE =
-  "https://super-invention-qvp46rrwg67cxjvj-3000.app.github.dev";
+  "http://34.172.199.194:3000";
 
 function shortAddr(addr) {
   if (!addr) return "";
