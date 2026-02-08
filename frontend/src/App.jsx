@@ -454,7 +454,7 @@ function productTitle(id) {
         task,
         mode: task,
         customQuery,
-        userAddress: address,
+        userAddress: agentWallet,
       }),
     });
 
