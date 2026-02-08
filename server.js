@@ -80,13 +80,7 @@ const AGENT_WALLET_ABI = [
 const X402_ABI = [
   "function pay(uint256 datasetId)"
 ];
-const agenticCommerce = new ethers.Contract(
-  X402_CONTRACT_ADDRESS,
-  [
-    "function payForProduct(uint256 productId, string task, bytes32 receiptId)",
-  ],
-  agentSigner
-);
+
 
 
 /* =======================

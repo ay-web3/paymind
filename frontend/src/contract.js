@@ -22,6 +22,7 @@ export const AGENT_MANAGER_ABI = [
   "function getMyAgent() view returns (address)",
   "function setDailyLimit(uint256 newLimit)",
   "function withdraw(uint256 amount)",
+  "function userToAgent(address) view returns (address)",
 
   // optional event
   "event AgentCreated(address indexed user, address agentWallet)"

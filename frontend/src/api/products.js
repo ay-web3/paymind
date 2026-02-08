@@ -1,5 +1,4 @@
-const API_BASE = "https://super-invention-qvp46rrwg67cxjvj-3000.app.github.dev";
-
+const API_BASE = "/api";
 export async function searchProducts(query) {
   if (!query.trim()) return [];
 

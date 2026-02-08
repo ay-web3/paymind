@@ -455,8 +455,7 @@ function productTitle(id) {
         mode: task,
         customQuery,
         userAddress: address, 
-        agentWallet,
-      }),
+        }),
     });
 
     const data = await res.json().catch(() => ({}));
