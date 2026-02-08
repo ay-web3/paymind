@@ -112,16 +112,17 @@ async function fetchAllProducts() {
   return all;
 }
 
-async function ensureApproval(agentWalletAddress, priceUSDC) {
+async function ensureApproval(agentWalletAddress) {
   const iface = new ethers.Interface([
-    "function approve(address,uint256)"
+    "function approve(address spender,uint256 amount)",
   ]);
 
+  // approve a big amount once (1,000,000 USDC)
   const amount = ethers.parseUnits("1000000", 6);
 
   const calldata = iface.encodeFunctionData("approve", [
     X402_CONTRACT_ADDRESS,
-    amount
+    amount,
   ]);
 
   const managerWrite = new ethers.Contract(
@@ -132,7 +133,7 @@ async function ensureApproval(agentWalletAddress, priceUSDC) {
 
   const tx = await managerWrite.executeFromAgent(
     agentWalletAddress,
-    USDC_ADDRESS,
+    USDC_ADDRESS, // token contract
     0,
     calldata,
     0
@@ -1007,7 +1008,6 @@ app.get("/crypto/search", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 
 /* =======================

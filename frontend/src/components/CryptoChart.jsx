@@ -214,7 +214,8 @@ useEffect(() => {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        userAddress: agentWallet,
+        userAddress: address,
+        agentWallet,
         coin,
         tf: timeframe
       })
