@@ -47,7 +47,10 @@ const USDC_ADDRESS = process.env.USDC_ADDRESS;
 ======================= */
 const PRODUCT_PRICE = "0.001";
 const PORT = 3000;
-const ARC_RPC_URL = "https://rpc.testnet.arc.network";
+const ARC_RPC_URL = process.env.ARC_RPC_URL;
+if (!ARC_RPC_URL) throw new Error("Missing ARC_RPC_URL in env");
+
+
 
 const X402_CONTRACT_ADDRESS = "0x12d6DaaD7d9f86221e5920E7117d5848EC0528e6";
 const AGENT_MANAGER_ADDRESS = process.env.AGENT_MANAGER_ADDRESS;
