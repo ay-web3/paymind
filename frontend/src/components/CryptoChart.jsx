@@ -22,7 +22,7 @@ import { Chart } from "react-chartjs-2";
 import "chartjs-adapter-date-fns";
 import { Filler } from "chart.js";
 import TradePlanCard from "./TradePlanCard";
-
+import { ScatterController } from "chart.js";
 
 ChartJS.register(
   LinearScale,
@@ -34,6 +34,7 @@ ChartJS.register(
   zoomPlugin,
   BarElement,
   LineController,
+  ScatterController,
   LineElement,
   PointElement,
   CandlestickController,
