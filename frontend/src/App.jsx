@@ -446,7 +446,7 @@ function productTitle(id) {
   tick();
 
   try {
-    const res = await fetch(`${API_BASE}/ai-query`, {
+    const res = await fetch(`${API_BASE}/ai/ai-query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

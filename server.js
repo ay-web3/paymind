@@ -1008,7 +1008,7 @@ app.get("/crypto/search", async (req, res) => {
    AI ANALYSIS
 ======================= */
 
-app.post("/ai-query", async (req, res) => {
+app.post("/ai/ai-query", async (req, res) => {
   try {
     const { productId, task, userAddress, mode, customQuery } = req.body;
 
@@ -1423,7 +1423,7 @@ ${
    EXTRA AI ENDPOINTS 
 ======================= */
 
-app.post("/ai-profit-check", async (req, res) => {
+app.post("/ai/ai-profit-check", async (req, res) => {
   const { productId } = req.body;
 
   const product = await fetch(`https://dummyjson.com/products/${productId}`).then(r => r.json());
