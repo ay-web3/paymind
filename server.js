@@ -141,6 +141,51 @@ async function initProducts() {
   for (const p of PRODUCT_CACHE) PRODUCT_MAP[p.id] = p.title;
   console.log(`✅ Loaded ${PRODUCT_CACHE.length} products`);
 }
+
+async function ensureApprovalIfNeeded(agentWalletAddress, neededUSDC) {
+  const tokenRead = new ethers.Contract(
+    USDC_ADDRESS,
+    ["function allowance(address owner,address spender) view returns (uint256)"],
+    provider
+  );
+
+  const current = await tokenRead.allowance(agentWalletAddress, X402_CONTRACT_ADDRESS);
+
+  // If allowance is already enough, do nothing
+  if (current >= neededUSDC) {
+    return { approved: false, current };
+  }
+
+  // Otherwise approve a big amount once
+  const approveIface = new ethers.Interface([
+    "function approve(address spender,uint256 amount)",
+  ]);
+
+  const approveAmount = ethers.parseUnits("1000000", 6); // 1,000,000 USDC
+
+  const calldata = approveIface.encodeFunctionData("approve", [
+    X402_CONTRACT_ADDRESS,
+    approveAmount,
+  ]);
+
+  const managerWrite = new ethers.Contract(
+    AGENT_MANAGER_ADDRESS,
+    ["function executeFromAgent(address,address,uint256,bytes,uint256)"],
+    signer
+  );
+
+  const tx = await managerWrite.executeFromAgent(
+    agentWalletAddress,
+    USDC_ADDRESS,
+    0,
+    calldata,
+    0
+  );
+
+  await tx.wait();
+  return { approved: true, current, txHash: tx.hash };
+}
+
 async function agentPayForAccess(userAddress, productId, task, priceUSDC) {
 
   const managerRead = new ethers.Contract(
@@ -173,9 +218,9 @@ async function agentPayForAccess(userAddress, productId, task, priceUSDC) {
   );
 
   const price = ethers.parseUnits(priceUSDC.toString(), 6);
+  await ensureApprovalIfNeeded(agentWalletAddress, price);
 
-  // ✅ 1. Agent approves USDC
-  await ensureApproval(agentWalletAddress);
+  
 
   // ✅ 2. Agent pays X402 contract
   const tx = await managerWrite.executeFromAgent(
